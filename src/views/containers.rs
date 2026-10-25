@@ -373,10 +373,13 @@ impl ContainersView {
                 })
                 .ok();
         })
-        .empty(div().p_4().child(if self.loaded {
+        .empty(div().p_4().child(if !self.loaded {
+            "Loading containers…"
+        } else if self.containers.is_empty() {
             "No containers in this profile."
         } else {
-            "Loading containers…"
+            // Every container is a hidden Kubernetes one.
+            "Only Kubernetes containers here. Click Kubernetes above to show them."
         }))
     }
 }

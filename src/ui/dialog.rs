@@ -21,6 +21,7 @@ pub struct ConfirmDialog {
     focus: FocusHandle,
     cancel_focus: FocusHandle,
     confirm_focus: FocusHandle,
+    option_focus: FocusHandle,
     previous_focus: Option<FocusHandle>,
     open: bool,
     /// An optional extra choice shown as a switch, off each time the dialog opens.
@@ -41,6 +42,7 @@ impl ConfirmDialog {
             focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
             confirm_focus: cx.focus_handle(),
+            option_focus: cx.focus_handle(),
             previous_focus: None,
             open: false,
             option: None,
@@ -69,6 +71,10 @@ impl ConfirmDialog {
     }
     pub fn is_open(&self) -> bool {
         self.open
+    }
+    fn toggle_option(&mut self, cx: &mut Context<Self>) {
+        self.option_on = !self.option_on;
+        cx.notify();
     }
     fn finish(&mut self, result: DialogResult, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
@@ -105,13 +111,24 @@ impl Render for ConfirmDialog {
                                         "escape" => {
                                             this.finish(DialogResult::Cancelled, window, cx)
                                         }
+                                        // Cancel → Confirm → the option (when shown) → Cancel.
                                         "tab" => {
                                             let target = if this.cancel_focus.is_focused(window) {
                                                 &this.confirm_focus
+                                            } else if this.confirm_focus.is_focused(window)
+                                                && this.option.is_some()
+                                            {
+                                                &this.option_focus
                                             } else {
                                                 &this.cancel_focus
                                             };
                                             window.focus(target, cx);
+                                        }
+                                        "space" | "enter"
+                                            if this.option.is_some()
+                                                && this.option_focus.is_focused(window) =>
+                                        {
+                                            this.toggle_option(cx)
                                         }
                                         _ => return,
                                     }
@@ -138,15 +155,20 @@ impl Render for ConfirmDialog {
                                     .when_some(self.option.clone(), |el, label| {
                                         let on = self.option_on;
                                         let toggle = cx.listener(|this: &mut Self, _, _, cx| {
-                                            this.option_on = !this.option_on;
-                                            cx.notify();
+                                            this.toggle_option(cx)
                                         });
                                         el.child(
                                             div()
                                                 .id("confirm-option")
+                                                .track_focus(&self.option_focus)
                                                 .flex()
                                                 .items_center()
                                                 .gap_2()
+                                                .p_0p5()
+                                                .rounded_sm()
+                                                .border_1()
+                                                .border_color(gpui::transparent_black())
+                                                .focus_visible(|s| s.border_color(t.border_focused))
                                                 .cursor_pointer()
                                                 .child(Switch::new("confirm-option-switch", on))
                                                 .child(label)
