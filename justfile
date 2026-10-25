@@ -37,6 +37,10 @@ check: lint test
 app:
     ./packaging/bundle.sh
 
+# Build the Linux AppImage for this architecture.
+appimage:
+    ./packaging/appimage.sh
+
 # Rebuild the app icon files from assets/brand/ColimaGPUI.icon (needs Xcode 26).
 icons:
     ./packaging/make-icons.sh
