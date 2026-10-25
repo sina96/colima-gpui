@@ -51,6 +51,11 @@ jobs:
       - name: Build examples
         run: cargo build --examples
 
-      # The packaged app: release build, Info.plist check and ad-hoc signature.
-      - name: Build app bundle
-        run: just app
+      # Checks the packaging files without a slow release build. The app bundle is built
+      # locally with `just app`, and by a release workflow on version tags (planned).
+      - name: Check packaging files
+        run: |
+          for script in packaging/*.sh; do bash -n "$script"; done
+          plutil -lint packaging/Info.plist
+          test -s packaging/AppIcon.icns
+          test -s packaging/Assets.car

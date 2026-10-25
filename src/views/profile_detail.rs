@@ -356,16 +356,22 @@ impl ProfileDetail {
         let dialog = cx.new(|cx| {
             ConfirmDialog::new(
                 format!("Delete profile “{profile}”?"),
-                "This removes the VM. Colima keeps its container data (images, containers and volumes) and reuses it if you create a profile with the same name and runtime again.",
+                "This removes the VM. Colima keeps its container data and reuses it for a new profile with the same name and runtime, unless you also delete it below. A different runtime needs the data deleted.",
                 cx,
             )
             .confirm_label("Delete")
+            .option("Also delete container data (images, containers and volumes)")
         });
-        let subscription = cx.subscribe(&dialog, |this, _, result, cx| {
+        let subscription = cx.subscribe(&dialog, |this, dialog, result, cx| {
             if let Some((_, profile, _)) = this.confirm.take()
                 && *result == DialogResult::Confirmed
             {
-                this.run(Op::Delete, profile, cx);
+                let op = if dialog.read(cx).option_on() {
+                    Op::DeleteWithData
+                } else {
+                    Op::Delete
+                };
+                this.run(op, profile, cx);
             }
             cx.notify();
         });
@@ -503,7 +509,7 @@ impl ProfileDetail {
             let name = name.clone();
             Button::new(
                 id,
-                if busy == Some(op) {
+                if busy == Some(op) || (op.is_delete() && busy.is_some_and(Op::is_delete)) {
                     op.progress_label()
                 } else {
                     label
@@ -513,7 +519,7 @@ impl ProfileDetail {
             .size(ButtonSize::Medium)
             .disabled(any_busy)
             .on_click(cx.listener(move |this, _, window, cx| {
-                if op == Op::Delete {
+                if op.is_delete() {
                     this.confirm_delete(name.clone(), window, cx);
                 } else {
                     this.run(op, name.clone(), cx);
