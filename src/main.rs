@@ -2,7 +2,7 @@ use colima_gpui::{app, assets::Assets, settings, store, theme, ui};
 use gpui::App;
 use gpui_platform::application;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod tray;
 
 fn main() {
@@ -15,7 +15,7 @@ fn main() {
         ui::init(cx);
         app::init(cx);
         store::init(cx);
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         tray::init(cx);
 
         // Closing the last window quits, unless the app keeps running in the menu bar.
@@ -23,7 +23,7 @@ fn main() {
             if !cx.windows().is_empty() {
                 return;
             }
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             if tray::keeps_running(cx) {
                 tray::enter_background(cx);
                 return;

@@ -62,6 +62,7 @@ pub enum Command {
 }
 
 impl Command {
+    #[cfg(any(target_os = "macos", test))]
     pub fn id(&self) -> String {
         match self {
             Command::Start(name) => format!("start:{name}"),
@@ -75,6 +76,7 @@ impl Command {
         }
     }
 
+    #[cfg(any(target_os = "macos", test))]
     pub fn parse(id: &str) -> Option<Self> {
         let (verb, name) = match id.split_once(':') {
             Some((verb, name)) => (verb, Some(name.to_owned())),
