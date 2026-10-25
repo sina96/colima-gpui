@@ -110,6 +110,13 @@ pub fn search_dirs(home: Option<&Path>, path: Option<&OsStr>) -> Vec<PathBuf> {
     if let Some(home) = home {
         dirs.push(home.join(".nix-profile/bin"));
     }
+    #[cfg(target_os = "linux")]
+    {
+        dirs.push(PathBuf::from("/home/linuxbrew/.linuxbrew/bin"));
+        if let Some(home) = home {
+            dirs.push(home.join(".local/bin"));
+        }
+    }
     if let Some(path) = path {
         dirs.extend(std::env::split_paths(path));
     }
@@ -198,6 +205,27 @@ pub fn run(program: &str, args: &[&str]) -> Result<Output, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_search_dirs_precede_path_and_remove_duplicates() {
+        assert_eq!(
+            search_dirs(
+                Some(Path::new("/home/test")),
+                Some(OsStr::new("/usr/bin:/home/test/.local/bin:/usr/local/bin")),
+            ),
+            vec![
+                PathBuf::from("/opt/homebrew/bin"),
+                PathBuf::from("/usr/local/bin"),
+                PathBuf::from("/home/test/.nix-profile/bin"),
+                PathBuf::from("/home/linuxbrew/.linuxbrew/bin"),
+                PathBuf::from("/home/test/.local/bin"),
+                PathBuf::from("/usr/bin"),
+            ]
+        );
+        assert!(search_dirs(None, None).contains(&PathBuf::from("/home/linuxbrew/.linuxbrew/bin")));
+    }
+
     #[test]
     fn colima_errors_are_summarized() {
         // Captured from `colima ssh` run from a folder the VM doesn't mount.
