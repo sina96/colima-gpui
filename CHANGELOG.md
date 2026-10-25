@@ -6,6 +6,17 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-25
+
+### Changed
+
+- Settings → About shows "Up to date" (or why the check failed) only after you click **Check for updates** or use **Check for Updates…**, and hides it again when you switch sections or close Settings.
+- A profile without the Docker runtime shows a short "No Docker tabs" note in the tab row, with the reason on hover, instead of a long sentence.
+
+### Fixed
+
+- The delete dialog's "Also delete container data" text wraps inside the dialog instead of running past its edge, and the dialog's message is shorter.
+
 ## [0.1.0] - 2026-10-25
 
 The first public version: a native macOS app for Colima, for Apple silicon and Intel Macs.
@@ -48,5 +59,6 @@ The first public version: a native macOS app for Colima, for Apple silicon and I
   - Settings → Help links to the documentation for Colima, Lima, Docker, Docker Compose, containerd, Kubernetes, k3s and kubectl.
 - **Downloads:** a `.dmg` and a `.zip` for Apple silicon and for Intel Macs, with SHA-256 checksums.
 
-[Unreleased]: https://github.com/sina96/colima-gpui/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sina96/colima-gpui/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/sina96/colima-gpui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sina96/colima-gpui/releases/tag/v0.1.0

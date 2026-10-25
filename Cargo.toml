@@ -1,6 +1,6 @@
 [package]
 name = "colima-gpui"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Native macOS app for managing Colima profiles and their Docker containers, built with GPUI"
 license = "MIT"

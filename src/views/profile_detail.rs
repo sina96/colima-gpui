@@ -11,7 +11,9 @@ use crate::theme::{ActiveTheme, MONO_FONT, Theme};
 use crate::ui::badge::Badge;
 use crate::ui::button::ButtonSize;
 use crate::ui::dialog::{ConfirmDialog, DialogResult};
-use crate::ui::{Button, ButtonStyle, ErrorNote, Icon, IconButton, IconName, Meter, Switch};
+use crate::ui::{
+    Button, ButtonStyle, ErrorNote, Icon, IconButton, IconName, InfoTip, Meter, Switch,
+};
 use crate::views::ai::AiView;
 use crate::views::cleanup::CleanupView;
 use crate::views::containers::ContainersView;
@@ -356,11 +358,11 @@ impl ProfileDetail {
         let dialog = cx.new(|cx| {
             ConfirmDialog::new(
                 format!("Delete profile “{profile}”?"),
-                "This removes the VM. Colima keeps its container data and reuses it for a new profile with the same name and runtime, unless you also delete it below. A different runtime needs the data deleted.",
+                "This removes the VM. Colima keeps the container data for a new profile with the same name and runtime.",
                 cx,
             )
             .confirm_label("Delete")
-            .option("Also delete container data (images, containers and volumes)")
+            .option("Also delete container data (images, containers and volumes). Needed to recreate the profile with another runtime.")
         });
         let subscription = cx.subscribe(&dialog, |this, dialog, result, cx| {
             if let Some((_, profile, _)) = this.confirm.take()
@@ -829,11 +831,25 @@ impl ProfileDetail {
                                     }))
                             }),
                     )
+                    // A short note with the reason on hover, so the tab row stays one line.
                     .when(running && !inst.is_docker(), |el| {
-                        el.child(div().text_xs().text_color(theme.text_muted).child(format!(
-                            "Containers, images and volumes need the Docker runtime; this profile uses {}.",
-                            inst.container_runtime()
-                        )))
+                        el.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .ml_1()
+                                .text_xs()
+                                .text_color(theme.text_muted)
+                                .child("No Docker tabs")
+                                .child(InfoTip::new(
+                                    "no-docker-tabs",
+                                    format!(
+                                        "Containers, images, volumes and cleanup need the Docker runtime. This profile uses {}.",
+                                        inst.container_runtime()
+                                    ),
+                                )),
+                        )
                     }),
             )
             .when_some(ai_view, |el, view| {

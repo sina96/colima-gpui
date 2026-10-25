@@ -137,7 +137,8 @@ impl Render for ConfirmDialog {
                             ))
                             .child(
                                 div()
-                                    .w(px(360.))
+                                    .w(px(400.))
+                                    .max_w(viewport.width - px(32.))
                                     .p_3()
                                     .flex()
                                     .flex_col()
@@ -170,8 +171,13 @@ impl Render for ConfirmDialog {
                                                 .border_color(gpui::transparent_black())
                                                 .focus_visible(|s| s.border_color(t.border_focused))
                                                 .cursor_pointer()
-                                                .child(Switch::new("confirm-option-switch", on))
-                                                .child(label)
+                                                .child(div().flex_none().child(Switch::new(
+                                                    "confirm-option-switch",
+                                                    on,
+                                                )))
+                                                // Wraps beside the switch instead of
+                                                // running past the dialog's edge.
+                                                .child(div().flex_1().min_w_0().child(label))
                                                 .on_click(toggle),
                                         )
                                     })
