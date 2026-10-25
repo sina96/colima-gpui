@@ -77,6 +77,39 @@ Never test destructive actions on a profile you rely on, such as `default`.
 
 CI runs `just lint` and `just test` on macOS, builds the examples and checks the packaging files. It doesn't build the app bundle, so run `just app` yourself if you change anything in `packaging/`. A pull request needs a green CI run before it's merged.
 
+## Releasing
+
+Releases are made by the maintainer from a version tag. `.github/workflows/release.yml` does the rest:
+- It checks that the tag matches `Cargo.toml` and that `CHANGELOG.md` has notes for the version.
+- It builds the app on an Apple silicon and an Intel runner.
+- It publishes a GitHub Release with each architecture's `.dmg` and `.zip` and a `SHA256SUMS` file, using that version's changelog section as the notes.
+
+1. On `main`, set `version` in `Cargo.toml`, e.g. `0.2.0`, and run `cargo build` so `Cargo.lock` follows.
+2. In `CHANGELOG.md`:
+   1. Move the `[Unreleased]` entries under a new `## [0.2.0] - YYYY-MM-DD` heading, and leave `## [Unreleased]` empty above it.
+   2. Update the links at the bottom.
+   3. Preview the notes with `packaging/release-notes.sh 0.2.0`.
+3. Commit, push, and wait for CI to pass.
+4. Tag and push the tag:
+
+   ```sh
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+5. Follow the **Release** workflow in the Actions tab. After both builds, it waits for approval: click **Review deployments**, tick **release** and **Approve and deploy**. A minute later the release is on the Releases page.
+
+Only the repository owner can release: a tag ruleset limits `v*` tags to the owner, the workflow stops if anyone else pushed the tag, and publishing needs the owner's approval in the `release` environment.
+
+If the workflow fails before publishing, fix the problem, then move the tag and push it again:
+
+```sh
+git tag -d v0.2.0
+git push origin :refs/tags/v0.2.0
+git tag v0.2.0
+git push origin v0.2.0
+```
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).
