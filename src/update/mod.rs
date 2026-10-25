@@ -444,7 +444,14 @@ printf '%s' "$T22_PID" > "$5"
             "../../tests/fixtures/github_release_latest.json"
         ))
         .unwrap();
-        assert_eq!(release.version(), Some(Version(0, 2, 0)));
+        // Captured from GitHub's API for the real v0.1.1 release (which v0.1.0 updated to).
+        assert_eq!(release.version(), Some(Version(0, 1, 1)));
+        // The zip for each architecture is picked, never the .dmg next to it.
+        assert_eq!(
+            release.asset("aarch64").unwrap().name,
+            "Colima-GPUI-0.1.1-macos-arm64.zip"
+        );
+        assert!(release.assets.iter().any(|a| a.name == "SHA256SUMS"));
         assert!(
             release
                 .asset("aarch64")

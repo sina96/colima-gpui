@@ -163,3 +163,57 @@ jobs:
             --title "Colima GPUI $VERSION" \
             --notes-file notes.md \
             --verify-tag
+
+  # After publishing: reads the release back from GitHub as an installed app would, and runs
+  # the updater's checks on it, short of installing. A failure here means installed apps
+  # couldn't update to this release.
+  verify:
+    name: Verify the published release
+    needs: [check, publish]
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Download the release as the updater does
+        run: |
+          mkdir verify
+          gh api "repos/${{ github.repository }}/releases/latest" > verify/latest.json
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" \
+            --pattern "Colima-GPUI-$VERSION-macos-*.zip" --pattern SHA256SUMS --dir verify
+          ls -l verify
+
+      - name: The updater reads the release
+        env:
+          COLIMA_GPUI_RELEASE_JSON: verify/latest.json
+          COLIMA_GPUI_RELEASE_SUMS: verify/SHA256SUMS
+          COLIMA_GPUI_RELEASE_VERSION: ${{ needs.check.outputs.version }}
+        run: cargo test --test published_release -- --ignored
+
+      - name: Checksums, signature, identity and version of each app
+        working-directory: verify
+        run: |
+          shasum -a 256 -c SHA256SUMS --ignore-missing
+          for arch in arm64 x86_64; do
+            zip="Colima-GPUI-$VERSION-macos-$arch.zip"
+            grep -q "  $zip\$" SHA256SUMS || { echo "SHA256SUMS has no line for $zip" >&2; exit 1; }
+            mkdir "$arch" && ditto -x -k "$zip" "$arch"
+            app="$arch/Colima GPUI.app"
+            codesign --verify --strict "$app"
+            id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
+            version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+            [[ "$id" == dev.colima-gpui.Colima ]] || { echo "$zip: identifier $id" >&2; exit 1; }
+            [[ "$version" == "$VERSION" ]] || { echo "$zip: version $version" >&2; exit 1; }
+            [[ "$(lipo -archs "$app/Contents/MacOS/colima-gpui")" == "$arch" ]] || { echo "$zip: wrong architecture" >&2; exit 1; }
+            echo "$zip: OK ($id $version $arch)"
+          done

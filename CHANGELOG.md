@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Changed
+
+- The "update available" panel in Settings → About shows just the new version with **View on GitHub** and **Install and restart**; the release notes are on GitHub.
+
 ## [0.1.1] - 2026-10-25
 
 ### Changed
