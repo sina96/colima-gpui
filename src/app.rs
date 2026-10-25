@@ -6,6 +6,10 @@ use gpui::{
     WindowHandle, WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
+#[cfg(target_os = "linux")]
+#[path = "ui/window_controls.rs"]
+mod window_controls;
+
 use crate::links;
 use crate::settings::{self, Palette, Settings, ThemeMode};
 use crate::store::{ProfileStore, Selection};
@@ -58,6 +62,7 @@ pub const APP_NAME: &str = "Colima GPUI";
 /// Matches Zed's macOS title bar (`platform_title_bar_height`).
 const TITLE_BAR_HEIGHT: f32 = 32.;
 /// Clears the traffic lights, as Zed's `TRAFFIC_LIGHT_PADDING` does.
+#[cfg(not(target_os = "linux"))]
 const TRAFFIC_LIGHT_PADDING: f32 = 71.;
 const SIDEBAR_WIDTH: f32 = 220.;
 
@@ -207,6 +212,8 @@ pub fn open_main_window(cx: &mut App) -> gpui::Result<WindowHandle<ColimaApp>> {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(640.), px(400.))),
+            #[cfg(target_os = "linux")]
+            window_decorations: Some(gpui::WindowDecorations::Client),
             titlebar: Some(TitlebarOptions {
                 title: Some(APP_NAME.into()),
                 appears_transparent: true,
@@ -268,7 +275,16 @@ impl ColimaApp {
             .flex_none()
             .w_full()
             .h(px(TITLE_BAR_HEIGHT))
-            .pl(px(TRAFFIC_LIGHT_PADDING))
+            .map(|bar| {
+                #[cfg(target_os = "linux")]
+                {
+                    bar.justify_end()
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    bar.pl(px(TRAFFIC_LIGHT_PADDING))
+                }
+            })
             .bg(theme.title_bar_background)
             .border_b_1()
             .border_color(theme.border_variant)
@@ -289,7 +305,22 @@ impl ColimaApp {
             }))
             .on_click(|event, window, _| {
                 if event.click_count() == 2 {
+                    #[cfg(target_os = "linux")]
+                    if window.window_controls().maximize && window.is_resizable() {
+                        window.zoom_window();
+                    }
+                    #[cfg(not(target_os = "linux"))]
                     window.titlebar_double_click();
+                }
+            })
+            .map(|bar| {
+                #[cfg(target_os = "linux")]
+                {
+                    bar.child(window_controls::WindowControls)
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    bar
                 }
             })
     }
