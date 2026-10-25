@@ -22,7 +22,7 @@ use crate::views::navigate::{Navigate, Target};
 use crate::views::profile_form::{ProfileForm, ProfileFormEvent};
 use crate::views::volumes::VolumesView;
 
-const INSTALL_URL: &str = "https://github.com/abiosoft/colima#installation";
+const INSTALL_URL: &str = "https://colima.run/docs/installation/";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProfileTab {
@@ -986,25 +986,31 @@ impl Render for ProfileDetail {
             (LoadState::ColimaMissing, _, _) => empty_state(
                 &theme,
                 "Colima isn't installed",
-                "Install it with Homebrew. Profiles show up here as soon as it's available.",
+                if cfg!(target_os = "linux") {
+                    "Install Colima (see the installation guide). Profiles show up here as soon as it's available."
+                } else {
+                    "Install it with Homebrew. Profiles show up here as soon as it's available."
+                },
                 Some(
                     div()
                         .flex()
                         .flex_col()
                         .items_center()
                         .gap_3()
-                        .child(
-                            div()
-                                .px_2()
-                                .py_1()
-                                .rounded_sm()
-                                .bg(theme.element_background)
-                                .border_1()
-                                .border_color(theme.border_variant)
-                                .font_family(MONO_FONT)
-                                .text_sm()
-                                .child("brew install colima"),
-                        )
+                        .when(!cfg!(target_os = "linux"), |el| {
+                            el.child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_sm()
+                                    .bg(theme.element_background)
+                                    .border_1()
+                                    .border_color(theme.border_variant)
+                                    .font_family(MONO_FONT)
+                                    .text_sm()
+                                    .child("brew install colima"),
+                            )
+                        })
                         .child(
                             Button::new("install-docs", "Installation guide")
                                 .style(ButtonStyle::Primary)

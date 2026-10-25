@@ -5,7 +5,7 @@
 <h1 align="center">Colima GPUI</h1>
 
 <p align="center">
-  A fast, native macOS app for managing <a href="https://github.com/abiosoft/colima">Colima</a> profiles and the Docker containers, images and volumes inside them, built with <a href="https://www.gpui.rs/">GPUI</a>, the UI framework behind the <a href="https://zed.dev">Zed</a> editor.
+  A fast, native macOS and Linux app for managing <a href="https://github.com/abiosoft/colima">Colima</a> profiles and the Docker containers, images and volumes inside them, built with <a href="https://www.gpui.rs/">GPUI</a>, the UI framework behind the <a href="https://zed.dev">Zed</a> editor.
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 </p>
 -->
 
-> **Status:** early and under active development. macOS only for now; Linux is planned. [Download it](#install) or [build it from source](#build-from-source).
+> **Status:** early and under active development. Available for macOS and Linux. [Download it](#install) or [build it from source](#build-from-source).
 >
 > Colima GPUI is an independent project. It isn't affiliated with or endorsed by the Colima or Zed projects.
 
@@ -55,6 +55,8 @@
 
 ## Install
 
+### macOS
+
 1. Install [Colima](https://github.com/abiosoft/colima#installation) and the Docker CLI if you haven't:
 
    ```sh
@@ -84,9 +86,24 @@ To check a download, compare it with `SHA256SUMS` from the same release: `shasum
 
 **Updating:** download the new version and replace the app in Applications. In-app updates are planned.
 
+### Linux
+
+1. Install [Colima](https://colima.run/docs/installation/) and the Docker CLI for Linux.
+2. Download the `.AppImage` for your architecture from [Releases](https://github.com/sina96/colima-gpui/releases/latest): `Colima-GPUI-<version>-linux-x86_64.AppImage` or `Colima-GPUI-<version>-linux-aarch64.AppImage` (`uname -m` shows your architecture).
+3. Make it executable and run it:
+
+   ```sh
+   chmod +x Colima-GPUI-<version>-linux-<arch>.AppImage
+   ./Colima-GPUI-<version>-linux-<arch>.AppImage
+   ```
+
+AppImages need FUSE 2 (the `libfuse2` package on Debian/Ubuntu; `libfuse2t64` on Ubuntu 24.04). Without FUSE, run `./Colima-GPUI-<version>-linux-<arch>.AppImage --appimage-extract-and-run` instead.
+
+Check a Linux download with `sha256sum -c SHA256SUMS --ignore-missing` using `SHA256SUMS` from the same release.
+
 ## Requirements
 
-- macOS 11 or later. Colima itself may need a newer macOS, depending on the VM type.
+- macOS 11 or later, or a Linux desktop with X11 or Wayland. Colima itself may need a newer macOS, depending on the VM type.
 - [Colima](https://github.com/abiosoft/colima#installation) and the Docker CLI, for example:
 
   ```sh
@@ -97,7 +114,7 @@ The app finds `colima` and `docker` in Homebrew (`/opt/homebrew/bin`, `/usr/loca
 
 ## Build from source
 
-You need [Rust](https://rustup.rs), the Xcode Command Line Tools (`xcode-select --install`) and [just](https://github.com/casey/just) (`brew install just`). The exact Rust version is pinned in `rust-toolchain.toml`, and `rustup` installs it automatically.
+You need [Rust](https://rustup.rs) and [just](https://github.com/casey/just). On macOS, also install the Xcode Command Line Tools (`xcode-select --install`); `brew install just` installs the task runner. The exact Rust version is pinned in `rust-toolchain.toml`, and `rustup` installs it automatically.
 
 ```sh
 git clone https://github.com/sina96/colima-gpui.git
@@ -106,7 +123,7 @@ just app   # builds dist/Colima GPUI.app
 open "dist/Colima GPUI.app"
 ```
 
-`just dmg` builds a disk image as well, and `just run` starts a debug build without packaging.
+`just dmg` builds a macOS disk image as well, and `just run` starts a debug build without packaging. On Linux, install the build dependencies in [CONTRIBUTING.md](CONTRIBUTING.md#linux), then run `just appimage` to build `dist/Colima-GPUI-<version>-linux-<arch>.AppImage`.
 
 An app you build yourself isn't quarantined, so macOS opens it without the warning above. See [`packaging/README.md`](packaging/README.md) for details.
 

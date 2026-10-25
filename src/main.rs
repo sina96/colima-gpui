@@ -15,7 +15,7 @@ fn main() {
         ui::init(cx);
         app::init(cx);
         store::init(cx);
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(target_os = "macos")]
         tray::init(cx);
 
         // Closing the last window quits, unless the app keeps running in the menu bar.
@@ -33,5 +33,9 @@ fn main() {
         .detach();
 
         app::open_main_window(cx).expect("failed to open window");
+        // The Linux tray restores a missing window when disabled or unavailable.
+        // Give it the startup window before initializing that fallback.
+        #[cfg(target_os = "linux")]
+        tray::init(cx);
     });
 }
