@@ -6,13 +6,29 @@ All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md). To repor
 
 ## Requirements
 
-- A Mac with macOS 11 or later.
-- The Xcode Command Line Tools: `xcode-select --install`.
+- macOS 11 or later, or a Linux desktop.
+- On macOS, the Xcode Command Line Tools: `xcode-select --install`.
 - [Rust](https://rustup.rs) through `rustup`. The exact version is pinned in `rust-toolchain.toml`, and `rustup` installs it, with `rustfmt` and `clippy`, on first use.
-- [just](https://github.com/casey/just), the task runner: `brew install just`.
-- [Colima](https://github.com/abiosoft/colima) and the Docker CLI, for trying changes by hand: `brew install colima docker`.
+- [just](https://github.com/casey/just), the task runner (`brew install just` on macOS).
+- [Colima](https://github.com/abiosoft/colima) and the Docker CLI, for trying changes by hand (`brew install colima docker` on macOS).
 
 The first build compiles GPUI from the Zed repository and takes a few minutes. Later builds are incremental.
+
+### Linux
+
+Install Rust through `rustup`, [just](https://github.com/casey/just#installation), Colima and the Docker CLI, then install the GPUI build dependencies. On Debian/Ubuntu, the package list used by Linux CI is:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  clang cmake pkg-config \
+  libfontconfig-dev libfreetype-dev \
+  libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+  libx11-dev libx11-xcb-dev libxcb1-dev \
+  libvulkan-dev libglib2.0-dev libssl-dev libzstd-dev
+```
+
+Run `just check` and `cargo run` from the checkout. A desktop session with X11 or Wayland is required to inspect the UI. `just appimage` builds `dist/Colima-GPUI-<version>-linux-<arch>.AppImage`. To run the AppImage, install FUSE 2 (`libfuse2`, or `libfuse2t64` on Ubuntu 24.04), or pass `--appimage-extract-and-run`.
 
 ## Build, run and test
 
@@ -26,6 +42,7 @@ The first build compiles GPUI from the Zed repository and takes a few minutes. L
 | `just lint` | Checks formatting and runs clippy with warnings as errors. |
 | `just check` | Runs `just lint`, then `just test`. CI runs the same checks. |
 | `just app` | Builds `dist/Colima GPUI.app`: a release build, ad-hoc signed. |
+| `just appimage` | Builds the Linux AppImage for the current architecture. |
 | `just dmg` | Builds the app and `dist/Colima GPUI.dmg`. |
 | `just icons` | Rebuilds the app icon files from `assets/brand/ColimaGPUI.icon`. Needs Xcode 26. |
 | `just clean` | Removes `target/` and `dist/`. |
@@ -49,7 +66,7 @@ Never test destructive actions on a profile you rely on, such as `default`.
 | `src/colima/`, `src/docker/` | The CLI calls and the parsing of their JSON output. Plain Rust with no GPUI, so they are unit-tested. |
 | `src/views/` | The app's screens: profiles, overview, containers, images, volumes, cleanup, AI and settings. |
 | `src/ui/` | Reusable widgets (buttons, tables, cards, switches, …). GPUI ships none, so they live here. |
-| `src/tray/` | The macOS menu bar icon and the Dock menu. |
+| `src/tray/` | The macOS menu bar and Dock menus, and the Linux StatusNotifierItem tray. |
 | `src/theme.rs` | The color profiles and every color token. |
 | `tests/fixtures/` | Captured CLI output that the tests parse. |
 | `examples/` | The UI gallery and small widget demos. |
@@ -60,7 +77,7 @@ Never test destructive actions on a profile you rely on, such as `default`.
 
 [AGENTS.md](AGENTS.md) has the full rules for humans and coding agents. In short:
 
-- **Dependencies:** only GPUI from the Zed repository, plus `serde`/`serde_json` and `tray-icon`. Open an issue before you add another crate.
+- **Dependencies:** only GPUI from the Zed repository, plus `serde`/`serde_json`, `tray-icon` on macOS and `ksni` on Linux. Open an issue before you add another crate.
 - **CLI calls:** every call goes through the shared runner in `src/colima/cli.rs`, and runs on the background executor, never on the UI thread.
 - **Colors:** come from theme tokens in `src/theme.rs`, never inline. A new token needs a value in all four themes (Colima and Zed One, light and dark).
 - **New widgets:** go in `src/ui/` and in the UI gallery.
@@ -75,7 +92,7 @@ Never test destructive actions on a profile you rely on, such as `default`.
 4. If users see the change, add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
 5. Open the pull request and fill in the template. Add screenshots for UI changes.
 
-CI runs `just lint` and `just test` on macOS, builds the examples and checks the packaging files. It doesn't build the app bundle, so run `just app` yourself if you change anything in `packaging/`. A pull request needs a green CI run before it's merged.
+CI runs `just lint` and `just test` on macOS and Linux, builds the macOS examples and checks the packaging files. It doesn't build the app bundle, so run `just app` yourself if you change anything in `packaging/`. A pull request needs a green CI run before it's merged.
 
 ## Releasing
 

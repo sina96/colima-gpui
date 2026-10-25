@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Colima GPUI
+Comment=Manage Colima virtual machines and containers
+Exec=colima-gpui
+Icon=colima-gpui
+Terminal=false
+Categories=Development;System;
+StartupWMClass=colima-gpui

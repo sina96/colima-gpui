@@ -6,7 +6,7 @@ Native GUI for managing [Colima](https://github.com/abiosoft/colima), built with
 
 - `gpui` + `gpui_platform` from the Zed repo, pinned to one git `rev` in `Cargo.toml`. Both entries must always share the same rev.
 - Rust toolchain pinned in `rust-toolchain.toml` to match that Zed rev. Bump both together, and only in a change dedicated to the bump.
-- Dependencies are official only: GPUI from Zed, plus `serde`/`serde_json`. The one exception is `tray-icon` (menu bar icon). Discuss any other crate before adding it. Build widgets yourself in `src/ui/`.
+- Dependencies are official only: GPUI from Zed, plus `serde`/`serde_json`. The exceptions are `tray-icon` on macOS and `ksni` on Linux (menu bar/tray icon). Discuss any other crate before adding it. Build widgets yourself in `src/ui/`.
 - Colima and Docker are driven through their CLIs with JSON output (`colima list --json`, `colima status --json -p <profile>`, `docker ps --format json`).
 
 ## Look and feel: Zed

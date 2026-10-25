@@ -21,6 +21,40 @@ env:
 # Actions are pinned to full commit SHAs, so a moved tag can't change them.
 # Dependabot (.github/dependabot.yml) proposes updates.
 jobs:
+  linux:
+    name: Lint and test (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install GPUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake pkg-config \
+            libfontconfig-dev libfreetype-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxcb1-dev \
+            libvulkan-dev libglib2.0-dev libssl-dev libzstd-dev
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain
+
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: just
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Lint
+        run: just lint
+
+      - name: Test
+        run: just test
+
   check:
     name: Lint, test and build (macOS)
     runs-on: macos-26

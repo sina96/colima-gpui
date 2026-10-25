@@ -1,4 +1,4 @@
-//! GitHub release checking and macOS installation. No UI dependencies.
+//! GitHub release checking and platform-specific installation. No UI dependencies.
 use crate::colima::cli;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -50,16 +50,34 @@ impl Release {
         self.tag_name.strip_prefix('v').unwrap_or(&self.tag_name)
     }
     pub fn asset(&self, arch: &str) -> Option<&Asset> {
-        let arch = match arch {
-            "aarch64" => "arm64",
-            "x86_64" => "x86_64",
+        self.asset_for_platform(std::env::consts::OS, arch)
+    }
+    pub fn asset_for_platform(&self, platform: &str, arch: &str) -> Option<&Asset> {
+        let arch = match (platform, arch) {
+            ("linux", "aarch64") => "aarch64",
+            ("linux", "x86_64") => "x86_64",
+            ("macos", "aarch64") => "arm64",
+            ("macos", "x86_64") => "x86_64",
             _ => return None,
         };
-        let name = format!("Colima-GPUI-{}-macos-{arch}.zip", self.version_text());
+        let name = match platform {
+            "linux" => format!("Colima-GPUI-{}-linux-{arch}.AppImage", self.version_text()),
+            "macos" => format!("Colima-GPUI-{}-macos-{arch}.zip", self.version_text()),
+            _ => return None,
+        };
         self.assets.iter().find(|a| a.name == name)
     }
 }
 pub fn running_bundle() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        running_appimage()
+    }
+    #[cfg(not(target_os = "linux"))]
+    running_macos_bundle()
+}
+#[cfg(not(target_os = "linux"))]
+fn running_macos_bundle() -> Option<PathBuf> {
     if !cfg!(target_os = "macos") {
         return None;
     }
@@ -184,6 +202,7 @@ impl Drop for Temp {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+#[cfg(any(not(target_os = "linux"), test))]
 fn private_temp() -> Result<Temp, String> {
     // An explicit template with X's works with both BSD and GNU mktemp.
     let template = std::env::temp_dir().join("colima-gpui-update.XXXXXXXX");
@@ -207,6 +226,7 @@ fn run(program: &str, args: &[&std::ffi::OsStr]) -> Result<Vec<u8>, String> {
         ))
     }
 }
+#[cfg(not(target_os = "linux"))]
 fn plist(bundle: &Path, key: &str) -> Result<String, String> {
     let file = bundle.join("Contents/Info.plist");
     let value = run(
@@ -220,6 +240,7 @@ fn plist(bundle: &Path, key: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&value).trim().to_owned())
 }
 /// Validates everything before returning a detached replacement helper.
+#[cfg(not(target_os = "linux"))]
 pub fn install(release: &Release) -> Result<(), String> {
     let bundle = running_bundle().ok_or("The running app is not in an app bundle")?;
     // macOS runs a quarantined app that wasn't moved out of the disk image or Downloads from
@@ -355,6 +376,91 @@ pub fn install(release: &Release) -> Result<(), String> {
     std::mem::forget(temp); // Helper owns cleanup from this point.
     Ok(())
 }
+#[cfg(target_os = "linux")]
+fn running_appimage() -> Option<PathBuf> {
+    let path = PathBuf::from(std::env::var_os("APPIMAGE")?);
+    if !path.is_absolute() || !std::fs::symlink_metadata(&path).ok()?.is_file() {
+        return None;
+    }
+    match std::fs::OpenOptions::new().write(true).open(&path) {
+        Ok(_) => {}
+        // The mounted runtime may still execute this inode. Linux checks write
+        // permission before reporting ETXTBSY; replacing it by rename is safe.
+        Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {}
+        Err(_) => return None,
+    }
+    Some(path)
+}
+
+#[cfg(target_os = "linux")]
+pub fn install(release: &Release) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let app = running_appimage().ok_or("The running AppImage is not writable")?;
+    if release.version().ok_or("Invalid release version")?
+        <= Version::parse(env!("CARGO_PKG_VERSION")).unwrap()
+    {
+        return Err("Release is not newer than this app".into());
+    }
+    let mut old = app.as_os_str().to_owned();
+    old.push(".old");
+    if Path::new(&old).symlink_metadata().is_ok() {
+        return Err("An earlier .old backup exists; resolve it before updating".into());
+    }
+    let asset = release
+        .asset(std::env::consts::ARCH)
+        .ok_or("No update for this architecture")?;
+    let sums = release
+        .assets
+        .iter()
+        .find(|a| a.name == "SHA256SUMS")
+        .ok_or("Release has no SHA256SUMS")?;
+    // mktemp creates a private staging directory on the destination filesystem.
+    let template = app
+        .parent()
+        .ok_or("AppImage has no parent")?
+        .join(".colima-update.XXXXXXXX");
+    // Staging needs write access next to the AppImage, like the macOS check of the app's folder.
+    let output = run("/usr/bin/mktemp", &["-d".as_ref(), template.as_os_str()]).map_err(|_| {
+        "The AppImage's folder is not writable. Download the update from View on GitHub.".to_owned()
+    })?;
+    let temp = Temp(PathBuf::from(String::from_utf8_lossy(&output).trim()));
+    let new = temp.0.join("update.AppImage");
+    let sums_path = temp.0.join("SHA256SUMS");
+    curl(&asset.browser_download_url, Some(&new))?;
+    curl(&sums.browser_download_url, Some(&sums_path))?;
+    if std::fs::metadata(&new).map_err(|e| e.to_string())?.len() != asset.size {
+        return Err("Download size differs from release asset".into());
+    }
+    let sums_text = std::fs::read_to_string(sums_path).map_err(|e| e.to_string())?;
+    let expected = checksum(&sums_text, &asset.name)?;
+    let actual = run("/usr/bin/sha256sum", &[new.as_os_str()])?;
+    if !String::from_utf8_lossy(&actual)
+        .split_whitespace()
+        .next()
+        .is_some_and(|hash| hash.eq_ignore_ascii_case(expected))
+    {
+        return Err("Update checksum mismatch".into());
+    }
+    std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| e.to_string())?;
+    let script = temp.0.join("install.sh");
+    std::fs::write(&script, include_str!("install-linux.sh")).map_err(|e| e.to_string())?;
+    let log = std::fs::File::create(temp.0.join("helper.log")).map_err(|e| e.to_string())?;
+    cli::command("/bin/sh")
+        .arg(&script)
+        .arg(std::process::id().to_string())
+        .arg(&app)
+        .arg(&new)
+        .arg(&temp.0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log.try_clone().map_err(|e| e.to_string())?))
+        .stderr(Stdio::from(log))
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    std::mem::forget(temp);
+    Ok(())
+}
+
 /// Called after the replacement's UI initializes, never by the old process.
 pub fn acknowledge_launch() {
     let args: Vec<_> = std::env::args_os().collect();
@@ -432,6 +538,80 @@ printf '%s' "$T22_PID" > "$5"
     }
 
     #[test]
+    fn linux_release_contract() {
+        let mut release: Release = serde_json::from_str(include_str!(
+            "../../tests/fixtures/github_release_latest.json"
+        ))
+        .unwrap();
+        for arch in ["aarch64", "x86_64"] {
+            let name = format!("Colima-GPUI-0.1.1-linux-{arch}.AppImage");
+            release.assets.push(Asset {
+                name: name.clone(),
+                browser_download_url: String::new(),
+                size: 1,
+            });
+            assert_eq!(
+                release.asset_for_platform("linux", arch).unwrap().name,
+                name
+            );
+            assert_eq!(
+                checksum(&format!("{}  {name}", "b".repeat(64)), &name).unwrap(),
+                "b".repeat(64)
+            );
+            #[cfg(target_os = "linux")]
+            assert_eq!(release.asset(arch).unwrap().name, name);
+        }
+        assert!(release.asset_for_platform("linux", "arm64").is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_helper_acknowledges_or_rolls_back() {
+        use std::os::unix::fs::PermissionsExt;
+        for fail in [false, true] {
+            let temp = private_temp().unwrap();
+            let app = temp.0.join("Colima ' $(touch INJECTED).AppImage");
+            let stage = temp.0.join("stage");
+            std::fs::create_dir(&stage).unwrap();
+            let new = stage.join("update.AppImage");
+            std::fs::write(&app, "#!/bin/sh\nexit 0\n# old").unwrap();
+            std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::write(
+                &new,
+                if fail {
+                    "#!/bin/sh\nexit 1\n"
+                } else {
+                    "#!/bin/sh\nprintf '%s' \"$$\" > child.pid\nprintf '%s' \"$$\" > \"$2\"\nexec sleep 30\n"
+                },
+            )
+            .unwrap();
+            std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let script = temp.0.join("helper.sh");
+            std::fs::write(&script, include_str!("install-linux.sh")).unwrap();
+            let status = cli::command("/bin/sh")
+                .arg(script)
+                .arg("99999999")
+                .arg(&app)
+                .arg(&new)
+                .arg(&stage)
+                .current_dir(&temp.0)
+                .status()
+                .unwrap();
+            assert_eq!(status.success(), !fail);
+            assert_eq!(
+                std::fs::read_to_string(&app).unwrap().contains("# old"),
+                fail
+            );
+            assert!(!temp.0.join("INJECTED").exists());
+            assert!(!PathBuf::from(format!("{}.old", app.display())).exists());
+            if !fail {
+                let pid = std::fs::read_to_string(temp.0.join("child.pid")).unwrap();
+                let _ = cli::command("kill").arg(pid).status();
+            }
+        }
+    }
+
+    #[test]
     fn versions() {
         assert!(Version::parse("v1.10.0") > Version::parse("1.2.9"));
         for bad in ["1.2", "1.2.3-rc1", "1.2.3.4", "01.2.3", "1.+2.3"] {
@@ -448,20 +628,20 @@ printf '%s' "$T22_PID" > "$5"
         assert_eq!(release.version(), Some(Version(0, 1, 1)));
         // The zip for each architecture is picked, never the .dmg next to it.
         assert_eq!(
-            release.asset("aarch64").unwrap().name,
+            release.asset_for_platform("macos", "aarch64").unwrap().name,
             "Colima-GPUI-0.1.1-macos-arm64.zip"
         );
         assert!(release.assets.iter().any(|a| a.name == "SHA256SUMS"));
         assert!(
             release
-                .asset("aarch64")
+                .asset_for_platform("macos", "aarch64")
                 .unwrap()
                 .name
                 .ends_with("arm64.zip")
         );
         assert!(
             release
-                .asset("x86_64")
+                .asset_for_platform("macos", "x86_64")
                 .unwrap()
                 .name
                 .ends_with("x86_64.zip")

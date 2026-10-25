@@ -398,17 +398,35 @@ impl SettingsView {
                     "Menu bar",
                     if cfg!(target_os = "macos") {
                         "Show Colima GPUI in the menu bar, and keep it running there when the window closes."
+                    } else if cfg!(target_os = "linux") {
+                        "Keep running in the tray when the window closes. Requires a StatusNotifierWatcher (on GNOME, enable AppIndicator support)."
                     } else {
                         "Keep running in the menu bar when the window closes. Not available on this platform yet."
                     },
                 ),
-                Switch::new("keep-running", settings.keep_running_in_menu_bar)
-                    .disabled(!cfg!(target_os = "macos"))
-                    .on_toggle(cx.listener(|_, on: &bool, _, cx| {
-                        let on = *on;
-                        settings::update(cx, |settings| settings.keep_running_in_menu_bar = on);
-                        cx.notify();
-                    })),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .when(cfg!(target_os = "linux"), |el| {
+                        el.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.text_muted)
+                                .child("Requires a tray host"),
+                        )
+                    })
+                    .child(
+                        Switch::new("keep-running", settings.keep_running_in_menu_bar)
+                            .disabled(!cfg!(any(target_os = "macos", target_os = "linux")))
+                            .on_toggle(cx.listener(|_, on: &bool, _, cx| {
+                                let on = *on;
+                                settings::update(cx, |settings| {
+                                    settings.keep_running_in_menu_bar = on
+                                });
+                                cx.notify();
+                            })),
+                    ),
             ),
             setting_row(
                 theme,

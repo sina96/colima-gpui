@@ -6,6 +6,10 @@ use gpui::{
     WindowHandle, WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
+#[cfg(target_os = "linux")]
+#[path = "ui/window_controls.rs"]
+mod window_controls;
+
 use crate::links;
 use crate::settings::{self, Palette, Settings, ThemeMode};
 use crate::store::{ProfileStore, Selection};
@@ -58,6 +62,7 @@ pub const APP_NAME: &str = "Colima GPUI";
 /// Matches Zed's macOS title bar (`platform_title_bar_height`).
 const TITLE_BAR_HEIGHT: f32 = 32.;
 /// Clears the traffic lights, as Zed's `TRAFFIC_LIGHT_PADDING` does.
+#[cfg(not(target_os = "linux"))]
 const TRAFFIC_LIGHT_PADDING: f32 = 71.;
 const SIDEBAR_WIDTH: f32 = 220.;
 
@@ -201,12 +206,19 @@ fn about(_: &About, cx: &mut App) {
 
 /// Opens the main window. Also used to reopen it from the menu bar.
 pub fn open_main_window(cx: &mut App) -> gpui::Result<WindowHandle<ColimaApp>> {
+    if let Some(window) = cx.windows().iter().find_map(|w| w.downcast::<ColimaApp>()) {
+        window.update(cx, |_, window, _| window.activate_window())?;
+        cx.activate(true);
+        return Ok(window);
+    }
     let store = ProfileStore::global(cx);
     let bounds = Bounds::centered(None, size(px(1000.), px(640.)), cx);
     let window = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(640.), px(400.))),
+            #[cfg(target_os = "linux")]
+            window_decorations: Some(gpui::WindowDecorations::Client),
             titlebar: Some(TitlebarOptions {
                 title: Some(APP_NAME.into()),
                 appears_transparent: true,
@@ -258,7 +270,19 @@ impl ColimaApp {
             .update(cx, |detail, cx| detail.show_tab(tab, cx));
     }
 
-    fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_title_bar(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        // X11 can fall back to server decorations even when Client was requested.
+        // In that case the window manager already provides the drag bar and controls.
+        #[cfg(target_os = "linux")]
+        if matches!(window.window_decorations(), gpui::Decorations::Server) {
+            return div().into_any_element();
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = window;
         let theme = cx.theme();
         div()
             .id("title-bar")
@@ -268,7 +292,16 @@ impl ColimaApp {
             .flex_none()
             .w_full()
             .h(px(TITLE_BAR_HEIGHT))
-            .pl(px(TRAFFIC_LIGHT_PADDING))
+            .map(|bar| {
+                #[cfg(target_os = "linux")]
+                {
+                    bar.justify_end()
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    bar.pl(px(TRAFFIC_LIGHT_PADDING))
+                }
+            })
             .bg(theme.title_bar_background)
             .border_b_1()
             .border_color(theme.border_variant)
@@ -289,9 +322,25 @@ impl ColimaApp {
             }))
             .on_click(|event, window, _| {
                 if event.click_count() == 2 {
+                    #[cfg(target_os = "linux")]
+                    if window.window_controls().maximize && window.is_resizable() {
+                        window.zoom_window();
+                    }
+                    #[cfg(not(target_os = "linux"))]
                     window.titlebar_double_click();
                 }
             })
+            .map(|bar| {
+                #[cfg(target_os = "linux")]
+                {
+                    bar.child(window_controls::WindowControls)
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    bar
+                }
+            })
+            .into_any_element()
     }
 
     fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -335,7 +384,7 @@ impl Render for ColimaApp {
         } else {
             self.settings = None;
         }
-        let title_bar = self.render_title_bar(cx);
+        let title_bar = self.render_title_bar(window, cx);
         let status_bar = self.render_status_bar(cx);
         let theme = cx.theme();
 

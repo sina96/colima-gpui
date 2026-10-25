@@ -28,11 +28,15 @@ fn published_release_is_one_the_updater_can_install() {
 
     let sums = std::fs::read_to_string(env("COLIMA_GPUI_RELEASE_SUMS")).unwrap();
     assert!(release.assets.iter().any(|a| a.name == "SHA256SUMS"));
-    // Every Mac the updater supports finds its zip, with a checksum for it.
-    for arch in ["aarch64", "x86_64"] {
+    for (platform, arch) in [
+        ("macos", "aarch64"),
+        ("macos", "x86_64"),
+        ("linux", "aarch64"),
+        ("linux", "x86_64"),
+    ] {
         let asset = release
-            .asset(arch)
-            .unwrap_or_else(|| panic!("no update for {arch}"));
+            .asset_for_platform(platform, arch)
+            .unwrap_or_else(|| panic!("no update for {platform} {arch}"));
         assert!(asset.size > 0, "{} is empty", asset.name);
         checksum(&sums, &asset.name).unwrap_or_else(|e| panic!("{}: {e}", asset.name));
     }
