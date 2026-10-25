@@ -211,6 +211,14 @@ fn plist(bundle: &Path, key: &str) -> Result<String, String> {
 /// Validates everything before returning a detached replacement helper.
 pub fn install(release: &Release) -> Result<(), String> {
     let bundle = running_bundle().ok_or("The running app is not in an app bundle")?;
+    // macOS runs a quarantined app that wasn't moved out of the disk image or Downloads from
+    // a hidden read-only copy ("App Translocation"); it can't be replaced there.
+    if bundle
+        .components()
+        .any(|c| c.as_os_str() == "AppTranslocation")
+    {
+        return Err("Move Colima GPUI to the Applications folder, open it from there, then install the update.".into());
+    }
     let parent = bundle.parent().ok_or("App has no parent folder")?;
     // Actual create permission, including ACLs; no attempt to elevate privileges.
     let probe = parent.join(format!(".colima-update-write-{}", std::process::id()));

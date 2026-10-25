@@ -1,4 +1,5 @@
 //! Container detail state and rendering. The parent owns the single visible poller.
+use crate::ui::ErrorNote;
 use std::collections::HashSet;
 
 use gpui::{Context, Entity, Window, div, prelude::*};
@@ -199,7 +200,7 @@ impl ContainersView {
                     });
                 }
                 body.when_some(self.usage_error.clone(), |el, error| {
-                    el.child(div().text_color(theme.error).child(error))
+                    el.child(ErrorNote::new("container-usage-error", error))
                 })
                 .into_any_element()
             }
@@ -282,7 +283,13 @@ impl ContainersView {
                 .bg(theme.editor_background)
                 .when_some(
                     self.error.clone().or(self.list_error.clone()),
-                    |el, error| el.child(div().p_2().text_color(theme.error).child(error)),
+                    |el, error| {
+                        el.child(
+                            div()
+                                .p_2()
+                                .child(ErrorNote::new("container-detail-error", error)),
+                        )
+                    },
                 )
                 .child(body),
         )
@@ -290,7 +297,6 @@ impl ContainersView {
 
     fn render_info(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let detail = self.detail.as_ref().expect("visible detail");
-        let theme = cx.theme().clone();
         let container = &detail.container;
         let usage = self
             .usage
@@ -345,7 +351,7 @@ impl ContainersView {
             });
         }
         if let Some(error) = &self.usage_error {
-            resources = resources.child(div().text_color(theme.error).child(error.clone()));
+            resources = resources.child(ErrorNote::new("container-resources-error", error.clone()));
         }
         let grid = CardGrid::new().card(summary).card(resources);
         let body = div().p_3().text_sm();
@@ -354,7 +360,7 @@ impl ContainersView {
             Some(Err(error)) => {
                 return body
                     .child(grid)
-                    .child(div().text_color(theme.error).child(error.clone()))
+                    .child(ErrorNote::new("container-error", error.clone()))
                     .into_any_element();
             }
             None => {

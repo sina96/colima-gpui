@@ -76,6 +76,9 @@ pub struct ProfileStore {
     refreshing: bool,
     refresh_again: bool,
     fetching_status: HashSet<String>,
+    /// The profiles marked "Start when Colima GPUI opens" were started (once per launch,
+    /// after the first successful `colima list`).
+    started_on_open: bool,
     _poll: Task<()>,
 }
 
@@ -130,6 +133,7 @@ impl ProfileStore {
             refreshing: false,
             refresh_again: false,
             fetching_status: HashSet::new(),
+            started_on_open: false,
             _poll: poll,
         }
     }
@@ -352,6 +356,7 @@ impl ProfileStore {
                 this.statuses.remove(&profile);
                 if op.is_delete() && result.is_ok() {
                     this.logs.remove(&profile);
+                    settings::update(cx, |s| s.set_start_on_open(&profile, false));
                 }
                 if let Err(e) = result {
                     this.errors.insert(profile, e.to_string().into());
@@ -369,6 +374,12 @@ impl ProfileStore {
             Ok(instances) => {
                 self.instances = instances;
                 self.load = LoadState::Ready;
+                if !std::mem::replace(&mut self.started_on_open, true) {
+                    let wanted = settings::get(cx).start_on_open.clone();
+                    for name in profiles_to_start(&self.instances, &wanted) {
+                        self.start(name, None, false, cx);
+                    }
+                }
             }
             Err(CliError::Spawn { source, .. }) if source.kind() == ErrorKind::NotFound => {
                 self.instances.clear();
@@ -442,6 +453,19 @@ impl ProfileStore {
 }
 
 /// The user's poll interval, or the default before settings are loaded.
+/// The profiles in `wanted` that exist and aren't running, in `wanted`'s order.
+fn profiles_to_start(instances: &[Instance], wanted: &[String]) -> Vec<String> {
+    wanted
+        .iter()
+        .filter(|name| {
+            instances
+                .iter()
+                .any(|i| &i.name == *name && !i.is_running())
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn poll_interval(cx: &App) -> Duration {
     cx.try_global::<settings::Settings>().map_or_else(
         || settings::Settings::default().poll_interval(),
@@ -454,4 +478,29 @@ pub fn init(cx: &mut App) -> Entity<ProfileStore> {
     let store = cx.new(ProfileStore::new);
     cx.set_global(GlobalProfileStore(store.clone()));
     store
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn instance(name: &str, status: &str) -> Instance {
+        serde_json::from_str(&format!(r#"{{"name":"{name}","status":"{status}"}}"#)).unwrap()
+    }
+
+    #[test]
+    fn only_wanted_profiles_that_exist_and_are_stopped_start() {
+        let instances = [
+            instance("default", "Stopped"),
+            instance("work", "Running"),
+            instance("gpui-test", "Stopped"),
+            instance("other", "Stopped"),
+        ];
+        let wanted = ["gpui-test", "work", "deleted", "default"].map(String::from);
+        assert_eq!(
+            profiles_to_start(&instances, &wanted),
+            ["gpui-test", "default"]
+        );
+        assert!(profiles_to_start(&instances, &[]).is_empty());
+    }
 }

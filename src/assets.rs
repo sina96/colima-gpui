@@ -105,6 +105,10 @@ pub(crate) const ICONS: &[(&str, &[u8])] = &[
     ("icons/tag.svg", include_bytes!("../assets/icons/tag.svg")),
     ("icons/bug.svg", include_bytes!("../assets/icons/bug.svg")),
     (
+        "icons/circle-alert.svg",
+        include_bytes!("../assets/icons/circle-alert.svg"),
+    ),
+    (
         "icons/git-pull-request.svg",
         include_bytes!("../assets/icons/git-pull-request.svg"),
     ),

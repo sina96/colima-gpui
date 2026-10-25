@@ -1,4 +1,5 @@
 //! Disk usage and explicitly confirmed cleanup for one visible Docker profile.
+use crate::ui::ErrorNote;
 use gpui::{
     Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString, Subscription, Task,
     Window, anchored, container_query, deferred, div, point, prelude::*, px,
@@ -448,7 +449,7 @@ impl Render for CleanupView {
                     .map(format_size).unwrap_or_else(|| "unavailable".into()),
             )))
             .when_some(self.disk_error.clone(), |el, error| {
-                el.child(div().text_xs().text_color(t.error).child(error))
+                el.child(div().text_xs().child(ErrorNote::new("cleanup-disk-error", error)))
             });
         let actions = div().grid().gap_2().children(
             [
@@ -495,7 +496,7 @@ impl Render for CleanupView {
         // Query the viewport, then scroll the content inside it. Query children
         // cannot determine their parent's height, so keep the content unconstrained.
         let content = div().w_full().flex_none().flex().flex_col().gap_2()
-            .when_some(self.error.clone().or(self.list_error.clone()), |el, error| el.child(div().text_xs().text_color(t.error).child(error)))
+            .when_some(self.error.clone().or(self.list_error.clone()), |el, error| el.child(div().text_xs().child(ErrorNote::new("cleanup-error", error))))
             .when_some(self.result.clone(), |el, result| el.child(div().text_xs().text_color(t.success).child(result)))
             .when(!self.loaded, |el| el.child(div().text_color(t.text_muted).child("Loading disk usage…")))
             .when(self.disk.as_ref().is_some_and(VmDisk::nearly_full), |el| el.child(div().p_2().text_xs().text_color(t.warning).border_1().border_color(t.warning).rounded_sm()

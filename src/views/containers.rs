@@ -13,7 +13,8 @@ use crate::docker::{commands, model::Container, stats};
 use crate::theme::ActiveTheme;
 use crate::ui::dialog::{ConfirmDialog, DialogResult};
 use crate::ui::{
-    Button, ButtonStyle, Column, IconName, MenuButton, MenuItem, StatusDot, Table, TextCell,
+    Button, ButtonStyle, Column, ErrorNote, IconName, MenuButton, MenuItem, StatusDot, Table,
+    TextCell,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -458,10 +459,22 @@ impl Render for ContainersView {
             )
             .when_some(
                 self.error.clone().or(self.list_error.clone()),
-                |el, error| el.child(div().px_2().py_1().text_color(theme.error).child(error)),
+                |el, error| {
+                    el.child(
+                        div()
+                            .px_2()
+                            .py_1()
+                            .child(ErrorNote::new("containers-error", error)),
+                    )
+                },
             )
             .when_some(self.usage_error.clone(), |el, error| {
-                el.child(div().px_2().py_1().text_color(theme.error).child(error))
+                el.child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .child(ErrorNote::new("containers-usage-error", error)),
+                )
             })
             .child(self.table(cx))
             .when_some(self.confirm.as_ref(), |el, (dialog, _)| {

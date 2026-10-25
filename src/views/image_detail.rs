@@ -1,4 +1,5 @@
 //! Image detail content. The Images view owns navigation, polling and confirmations.
+use crate::ui::ErrorNote;
 use std::rc::Rc;
 
 use gpui::{Context, div, prelude::*, px};
@@ -36,7 +37,11 @@ impl ImageDetail {
             .min_w_0()
             .text_sm()
             .when_some(self.error.clone(), |el, error| {
-                el.child(div().p_2().text_color(theme.error).child(error))
+                el.child(
+                    div()
+                        .p_2()
+                        .child(ErrorNote::new("image-detail-error", error)),
+                )
             })
             .when(self.data.is_none() && self.error.is_none(), |el| {
                 el.child(div().p_2().child("Loading image details…"))

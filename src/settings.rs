@@ -45,12 +45,14 @@ pub struct Settings {
     pub poll_secs: u64,
     /// Show the menu bar icon, and keep running there when the window closes.
     pub keep_running_in_menu_bar: bool,
-    /// Check GitHub Releases for updates (not wired up yet).
+    /// Check GitHub Releases for updates at launch and every 12 hours (release builds only).
     pub check_for_updates: bool,
     /// Return unused VM blocks to the host after Docker cleanup.
     pub trim_after_prune: bool,
     /// Last folder the AI tab downloaded the Colima agent skill into.
     pub skill_folder: Option<std::path::PathBuf>,
+    /// Profiles started when the app opens (if stopped), in the order they were turned on.
+    pub start_on_open: Vec<String>,
 }
 
 impl Default for Settings {
@@ -63,11 +65,26 @@ impl Default for Settings {
             check_for_updates: true,
             trim_after_prune: true,
             skill_folder: None,
+            start_on_open: Vec::new(),
         }
     }
 }
 
 impl Global for Settings {}
+
+impl Settings {
+    pub fn starts_on_open(&self, profile: &str) -> bool {
+        self.start_on_open.iter().any(|name| name == profile)
+    }
+
+    /// Adds or removes `profile` from the profiles started when the app opens.
+    pub fn set_start_on_open(&mut self, profile: &str, on: bool) {
+        self.start_on_open.retain(|name| name != profile);
+        if on {
+            self.start_on_open.push(profile.to_owned());
+        }
+    }
+}
 
 #[derive(Default)]
 struct PendingSave(Option<Task<()>>);
@@ -162,6 +179,20 @@ pub fn update(cx: &mut App, change: impl FnOnce(&mut Settings)) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn start_on_open_adds_once_and_removes() {
+        let mut settings = Settings::default();
+        settings.set_start_on_open("default", true);
+        settings.set_start_on_open("default", true);
+        settings.set_start_on_open("work", true);
+        assert_eq!(settings.start_on_open, ["default", "work"]);
+        assert!(settings.starts_on_open("work"));
+        settings.set_start_on_open("default", false);
+        assert_eq!(settings.start_on_open, ["work"]);
+        assert!(!settings.starts_on_open("default"));
+    }
+
     use super::*;
 
     fn temp_path(name: &str) -> PathBuf {
@@ -184,6 +215,7 @@ mod tests {
             check_for_updates: false,
             trim_after_prune: false,
             skill_folder: Some("/tmp/agent-skills".into()),
+            start_on_open: vec!["default".into(), "gpui-test".into()],
         };
         settings.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path), settings);

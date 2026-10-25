@@ -1,5 +1,11 @@
 //! UI adapter for the plain Rust updater. Its global entity survives window closure.
-use crate::{settings, store::ProfileStore, theme::ActiveTheme, ui::Button, update};
+use crate::{
+    settings,
+    store::ProfileStore,
+    theme::ActiveTheme,
+    ui::{Button, ButtonStyle},
+    update,
+};
 use gpui::{App, Context, Entity, Global, Subscription, Window, div, prelude::*};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -23,6 +29,8 @@ pub struct Updater {
     pub result: String,
     pub install_error: Option<String>,
     pub last_check: Option<SystemTime>,
+    /// Why the last check failed; `None` after a successful one.
+    pub last_error: Option<String>,
     pub busy: bool,
     pub open_updates: bool,
     last_attempt: Option<Instant>,
@@ -61,6 +69,7 @@ impl Updater {
                     result: "Not checked yet".into(),
                     install_error: launch_error(),
                     last_check: None,
+                    last_error: None,
                     busy: false,
                     open_updates: false,
                     last_attempt: None,
@@ -83,9 +92,10 @@ impl Updater {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.busy = false;
-                this.last_check = Some(SystemTime::now());
                 match result {
                     Ok(release) => {
+                        this.last_check = Some(SystemTime::now());
+                        this.last_error = None;
                         this.result = if release.is_some() {
                             "Update available"
                         } else {
@@ -94,13 +104,14 @@ impl Updater {
                         .into();
                         this.release = release;
                     }
-                    Err(error) => {
-                        this.result = if this.manual {
-                            error
-                        } else {
-                            "Automatic check did not complete; try Check now".into()
-                        };
+                    // Only a check the user started reports its failure; a failed automatic
+                    // check keeps the previous result (e.g. while offline).
+                    Err(error) if this.manual => {
+                        this.last_check = Some(SystemTime::now());
+                        this.last_error = Some(error.clone());
+                        this.result = error;
                     }
+                    Err(_) => {}
                 }
                 this.manual = false;
                 cx.notify();
@@ -168,6 +179,7 @@ impl Updater {
         )
     }
 }
+/// Opens Settings at About, where the update can be installed.
 pub fn show_updates(cx: &mut App) {
     Updater::global(cx).update(cx, |this, cx| {
         this.open_updates = true;
@@ -206,6 +218,8 @@ impl Render for UpdateBadge {
             |el, release| {
                 el.child(
                     Button::new("update-badge", format!("Update {}", release.tag_name))
+                        .style(ButtonStyle::Selected)
+                        .tooltip("A new version is available. Open Settings → About to install it.")
                         .on_click(|_, _, cx| show_updates(cx)),
                 )
             },

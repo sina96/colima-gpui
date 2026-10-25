@@ -1,4 +1,5 @@
 //! Docker volumes for one profile. Dropping the tab cancels its poller.
+use crate::ui::ErrorNote;
 use std::rc::Rc;
 
 use gpui::{
@@ -425,7 +426,7 @@ impl Render for VolumesView {
             )
             .when_some(
                 self.error.clone().or(self.list_error.clone()),
-                |el, error| el.child(div().px_2().py_1().text_color(theme.error).child(error)),
+                |el, error| el.child(div().px_2().py_1().child(ErrorNote::new("volumes-error", error))),
             )
             .when_some(self.notice.clone(), |el, notice| {
                 el.child(div().px_2().py_1().text_color(theme.success).child(notice))

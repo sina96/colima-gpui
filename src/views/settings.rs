@@ -17,7 +17,7 @@ use crate::store::ProfileStore;
 use crate::theme::{ActiveTheme, MONO_FONT, Theme};
 use crate::ui::button::{ButtonSize, ButtonStyle};
 use crate::ui::tooltip::tooltip;
-use crate::ui::{Button, InfoTip, Switch};
+use crate::ui::{Button, ErrorNote, Icon, IconName, InfoTip, Switch};
 
 pub const KEY_CONTEXT: &str = "Settings";
 
@@ -25,25 +25,17 @@ pub const KEY_CONTEXT: &str = "Settings";
 pub enum SettingsSection {
     Appearance,
     Behaviour,
-    Updates,
     Help,
     About,
 }
 
 impl SettingsSection {
-    const ALL: [SettingsSection; 5] = [
-        Self::Appearance,
-        Self::Behaviour,
-        Self::Updates,
-        Self::Help,
-        Self::About,
-    ];
+    const ALL: [SettingsSection; 4] = [Self::Appearance, Self::Behaviour, Self::Help, Self::About];
 
     fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
             Self::Behaviour => "Behaviour",
-            Self::Updates => "Updates",
             Self::Help => "Help",
             SettingsSection::About => "About",
         }
@@ -110,15 +102,10 @@ impl SettingsView {
         self.store.update(cx, |store, cx| store.close_settings(cx));
     }
 
-    fn render_about(&self, theme: &Theme, cx: &App) -> Vec<AnyRow> {
+    fn render_about(&self, theme: &Theme, cx: &mut Context<Self>) -> Vec<AnyRow> {
+        let mut rows = self.update_rows(theme, cx);
         let version = self.store.read(cx).version().cloned();
-        vec![
-            row(
-                theme,
-                "App version",
-                env!("CARGO_PKG_VERSION").into(),
-                false,
-            ),
+        rows.extend([
             row(
                 theme,
                 "Colima version",
@@ -144,7 +131,8 @@ impl SettingsView {
             row(theme, "Colima binary", self.colima_path.clone(), true),
             section_heading(theme, "Project"),
             link_tiles(theme, links::PROJECT),
-        ]
+        ]);
+        rows
     }
 
     /// Documentation for Colima and the tools it builds on, as tiles.
@@ -222,103 +210,128 @@ impl SettingsView {
         ]
     }
 
-    fn render_updates(&self, theme: &Theme, cx: &mut Context<Self>) -> Vec<AnyRow> {
+    /// The "App version" row with "Check for updates", then an available update (version,
+    /// notes, "Install and restart") or the last install error.
+    fn update_rows(&self, theme: &Theme, cx: &mut Context<Self>) -> Vec<AnyRow> {
         let updater = self.updater.read(cx);
-        let mut rows = vec![row(
-            theme,
-            "Current version",
-            env!("CARGO_PKG_VERSION").into(),
-            false,
-        )];
-        if !crate::update::enabled() {
-            rows.push(
-                div()
-                    .py_3()
-                    .text_sm()
-                    .text_color(theme.text_muted)
-                    .child(crate::update::DISABLED)
-                    .into_any_element(),
-            );
-            if crate::update::REPO.is_some() {
-                rows.push(
-                    div()
-                        .text_sm()
-                        .child("Run the release app from its .app bundle to enable updates.")
-                        .into_any_element(),
-                );
-            }
-            return rows;
-        }
-        rows.push(row(
-            theme,
-            "Last checked",
-            updater.checked_text().into(),
-            false,
-        ));
-        rows.push(
-            div()
-                .py_2()
-                .text_sm()
-                .child(updater.result.clone())
-                .into_any_element(),
-        );
-        if let Some(error) = &updater.install_error {
-            rows.push(
-                div()
-                    .py_2()
-                    .text_sm()
-                    .text_color(theme.error)
-                    .child(error.clone())
-                    .into_any_element(),
-            );
-        }
+        let enabled = crate::update::enabled();
         let busy = updater.busy;
-        rows.push(
-            Button::new("update-check", if busy { "Working…" } else { "Check now" })
-                .disabled(busy)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.updater
-                        .update(cx, |updater, cx| updater.check(true, cx));
-                }))
-                .into_any_element(),
-        );
-        if let Some(release) = updater.release.clone() {
+        // After a check: a tick when up to date, or why it failed. An available update shows
+        // as the panel below instead.
+        let checked = updater.last_check.is_some() && updater.release.is_none() && !busy;
+        let up_to_date = checked && updater.last_error.is_none();
+        let check_error = updater.last_error.clone().filter(|_| checked);
+        let mut rows = vec![value_row(
+            theme,
+            "App version",
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .min_w_0()
+                .child(env!("CARGO_PKG_VERSION"))
+                .child(
+                    Button::new("update-check", "Check for updates")
+                        .loading(busy)
+                        .disabled(!enabled)
+                        .tooltip(if enabled {
+                            "Check GitHub Releases for a newer version"
+                        } else {
+                            "Only release builds from GitHub can update themselves"
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.updater
+                                .update(cx, |updater, cx| updater.check(true, cx));
+                        })),
+                )
+                .when(up_to_date, |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .text_xs()
+                            .text_color(theme.success)
+                            .child(
+                                Icon::new(IconName::Check)
+                                    .size(px(14.))
+                                    .color(theme.success),
+                            )
+                            .child("Up to date"),
+                    )
+                })
+                .when_some(check_error, |el, error| {
+                    el.child(div().min_w_0().text_xs().child(
+                        ErrorNote::new("update-check-error", "Couldn't check").details(error),
+                    ))
+                }),
+        )];
+        if let Some(error) = updater.install_error.clone() {
             rows.push(
                 div()
-                    .pt_4()
-                    .text_sm()
-                    .child(format!("Available: {}", release.tag_name))
-                    .into_any_element(),
-            );
-            rows.push(
-                div()
-                    .id("release-notes")
-                    .max_h(px(220.))
-                    .overflow_y_scroll()
                     .py_2()
                     .text_sm()
-                    .child(release.body.unwrap_or_else(|| "No release notes".into()))
+                    .child(
+                        ErrorNote::new("update-error", "The update wasn't installed")
+                            .details(error),
+                    )
                     .into_any_element(),
             );
-            let url = release.html_url;
+        }
+        if let Some(release) = updater.release.clone() {
+            let url = release.html_url.clone();
             rows.push(
                 div()
                     .flex()
+                    .flex_col()
                     .gap_2()
-                    .child(Button::new("update-github", "View on GitHub").on_click(
-                        move |_, _, cx| {
-                            if url.starts_with("https://") {
-                                cx.open_url(&url);
-                            }
-                        },
-                    ))
+                    .my_2()
+                    .p_3()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.accent)
+                    .bg(theme.element_selected)
+                    .text_sm()
                     .child(
-                        Button::new("update-install", "Install and restart")
-                            .style(ButtonStyle::Primary)
-                            .disabled(busy)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.updater.update(cx, |updater, cx| updater.install(cx));
-                            })),
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(format!(
+                                "Colima GPUI {} is available",
+                                release.version_text()
+                            ))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_1()
+                                    .child(Button::new("update-github", "View on GitHub").on_click(
+                                        move |_, _, cx| {
+                                            if url.starts_with("https://") {
+                                                cx.open_url(&url);
+                                            }
+                                        },
+                                    ))
+                                    .child(
+                                        Button::new("update-install", "Install and restart")
+                                            .style(ButtonStyle::Primary)
+                                            .loading(busy)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.updater
+                                                    .update(cx, |updater, cx| updater.install(cx));
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("release-notes")
+                            .max_h(px(200.))
+                            .overflow_y_scroll()
+                            .text_xs()
+                            .text_color(theme.text_muted)
+                            .child(release.body.unwrap_or_else(|| "No release notes.".into())),
                     )
                     .into_any_element(),
             );
@@ -564,7 +577,7 @@ impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.updater.update(cx, |updater, _| {
             if updater.open_updates {
-                self.section = SettingsSection::Updates;
+                self.section = SettingsSection::About;
                 updater.open_updates = false;
             }
         });
@@ -572,7 +585,6 @@ impl Render for SettingsView {
         let rows = match self.section {
             SettingsSection::Appearance => self.render_appearance(&theme, cx),
             SettingsSection::Behaviour => self.render_behaviour(&theme, cx),
-            SettingsSection::Updates => self.render_updates(&theme, cx),
             SettingsSection::Help => self.render_help(&theme),
             SettingsSection::About => self.render_about(&theme, cx),
         };

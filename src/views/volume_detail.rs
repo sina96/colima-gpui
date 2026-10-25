@@ -1,4 +1,5 @@
 //! Body of the volume detail page; the owning tab manages polling and actions.
+use crate::ui::ErrorNote;
 use gpui::{Context, SharedString, div, prelude::*};
 
 use super::navigate::{Navigate, Target};
@@ -28,7 +29,7 @@ pub(super) fn body(
             )
         })
         .when_some(error, |el, error| {
-            el.child(div().text_color(theme.error).child(error))
+            el.child(ErrorNote::new("volume-detail-error", error))
         })
         .when(volume.is_some() && details.is_none(), |el| {
             el.child(
