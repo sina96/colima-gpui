@@ -97,7 +97,7 @@ Releases are made by the maintainer from a version tag. `.github/workflows/relea
    git push origin v0.2.0
    ```
 
-5. Follow the **Release** workflow in the Actions tab. After both builds, it waits for approval: click **Review deployments**, tick **release** and **Approve and deploy**. A minute later the release is on the Releases page.
+5. Follow the **Release** workflow in the Actions tab. After both builds, it waits for approval: click **Review deployments**, tick **release** and **Approve and deploy**. A minute later the release is on the Releases page. A last job, **Verify the published release**, then reads it back the way an installed app does: it checks that both zips match `SHA256SUMS` and that each app's signature, identifier, version and architecture are right. If it fails, installed apps can't update to that release, so fix it and publish a new version.
 
 Only the repository owner can release: a tag ruleset limits `v*` tags to the owner, the workflow stops if anyone else pushed the tag, and publishing needs the owner's approval in the `release` environment.
 
