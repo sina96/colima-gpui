@@ -2,6 +2,11 @@ name: Release
 
 # Publishes a GitHub Release when the maintainer pushes a version tag (v0.1.0, v0.2.0, ...).
 # Nothing here runs on branches or pull requests. CONTRIBUTING.md ("Releasing") has the steps.
+#
+# Only the owner releases:
+#   - pushing a tag needs write access, and a tag ruleset limits v* tags to the owner;
+#   - the check job stops unless the owner pushed the tag;
+#   - the publish job runs in the "release" environment, which waits for the owner's approval.
 on:
   push:
     tags: ["v*"]
@@ -22,6 +27,8 @@ jobs:
   # The tag must match Cargo.toml, and CHANGELOG.md must have notes for the version.
   check:
     name: Check version and notes
+    # Only the repository owner's tags are released.
+    if: github.actor == github.repository_owner
     runs-on: macos-26
     timeout-minutes: 10
     outputs:
@@ -106,6 +113,10 @@ jobs:
     needs: [check, build]
     runs-on: macos-26
     timeout-minutes: 15
+    # Waits for approval by the environment's required reviewers (the owner) before publishing.
+    environment:
+      name: release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
     permissions:
       contents: write
     env:
