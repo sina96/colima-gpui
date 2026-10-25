@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-26
+
+Colima GPUI now runs on Linux too.
+
 ### Added
 
 - **Linux:** Colima GPUI runs on Linux (x86_64 and arm64), packaged as an AppImage.
@@ -73,6 +77,7 @@ The first public version: a native macOS app for Colima, for Apple silicon and I
   - Settings → Help links to the documentation for Colima, Lima, Docker, Docker Compose, containerd, Kubernetes, k3s and kubectl.
 - **Downloads:** a `.dmg` and a `.zip` for Apple silicon and for Intel Macs, with SHA-256 checksums.
 
-[Unreleased]: https://github.com/sina96/colima-gpui/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/sina96/colima-gpui/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sina96/colima-gpui/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/sina96/colima-gpui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sina96/colima-gpui/releases/tag/v0.1.0
