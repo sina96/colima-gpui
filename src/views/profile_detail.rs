@@ -1174,16 +1174,23 @@ impl VmUsageView {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let command = crate::colima::cli::command("colima");
-                    let binary = command.get_program().to_string_lossy();
-                    let path = command
-                        .get_envs()
-                        .find(|(key, _)| *key == "PATH")
-                        .and_then(|(_, value)| value)
-                        .unwrap_or_default()
-                        .to_string_lossy();
-                    let script = terminal_script(&binary, &path, &profile);
-                    crate::colima::cli::run("/usr/bin/osascript", &["-e", &script])
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let command = crate::colima::cli::command("colima");
+                        let binary = command.get_program().to_string_lossy();
+                        let path = command
+                            .get_envs()
+                            .find(|(key, _)| *key == "PATH")
+                            .and_then(|(_, value)| value)
+                            .unwrap_or_default()
+                            .to_string_lossy();
+                        let script = terminal_script(&binary, &path, &profile);
+                        crate::colima::cli::run("/usr/bin/osascript", &["-e", &script]).map(|_| ())
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        open_linux_ssh(&profile)
+                    }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -1413,6 +1420,7 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+#[cfg(any(not(target_os = "linux"), test))]
 fn terminal_script(binary: &str, path: &str, profile: &str) -> String {
     let command = format!(
         "PATH={} {} ssh -p {}",
@@ -1422,6 +1430,113 @@ fn terminal_script(binary: &str, path: &str, profile: &str) -> String {
     );
     let escaped = command.replace('\\', "\\\\").replace('"', "\\\"");
     format!("tell application \"Terminal\" to do script \"{escaped}\"")
+}
+
+// Keep these helpers available to macOS tests as well as the Linux launcher.
+#[cfg(any(target_os = "linux", test))]
+const LINUX_TERMINALS: &[&str] = &[
+    "x-terminal-emulator",
+    "gnome-terminal",
+    "konsole",
+    "xfce4-terminal",
+    "kitty",
+    "alacritty",
+    "wezterm",
+    "foot",
+    "xterm",
+];
+
+#[cfg(any(target_os = "linux", test))]
+fn linux_terminal(
+    preferred: Option<&std::ffi::OsStr>,
+    path: Option<&std::ffi::OsStr>,
+) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs: Vec<_> = path
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect();
+    let find = |name: &std::ffi::OsStr| {
+        let name = std::path::Path::new(name);
+        let candidates = if name.components().count() > 1 {
+            vec![name.to_path_buf()]
+        } else {
+            dirs.iter().map(|dir| dir.join(name)).collect()
+        };
+        candidates.into_iter().find(|candidate| {
+            candidate.metadata().is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            })
+        })
+    };
+    // TERMINAL names one executable, including paths with spaces; never parse shell text.
+    if let Some(preferred) = preferred.filter(|value| !value.is_empty()) {
+        return find(preferred);
+    }
+    LINUX_TERMINALS
+        .iter()
+        .find_map(|name| find(std::ffi::OsStr::new(name)))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn linux_terminal_command(
+    terminal: &std::path::Path,
+    colima: &std::process::Command,
+    profile: &str,
+) -> std::process::Command {
+    let mut command = crate::colima::cli::command(&terminal.to_string_lossy());
+    let name = terminal
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    match name {
+        "gnome-terminal" => {
+            command.arg("--");
+        }
+        "xfce4-terminal" => {
+            command.arg("--execute");
+        }
+        "wezterm" => {
+            command.args(["start", "--"]);
+        }
+        "kitty" | "foot" => {}
+        _ => {
+            command.arg("-e");
+        }
+    }
+    command
+        .arg(colima.get_program())
+        .args(["ssh", "-p", profile]);
+    command.envs(
+        colima
+            .get_envs()
+            .filter_map(|(key, value)| value.map(|value| (key, value))),
+    );
+    command
+}
+
+#[cfg(target_os = "linux")]
+fn open_linux_ssh(profile: &str) -> Result<(), crate::colima::cli::CliError> {
+    let colima = crate::colima::cli::command("colima");
+    let terminal = linux_terminal(
+        std::env::var_os("TERMINAL").as_deref(),
+        std::env::var_os("PATH").as_deref(),
+    ).ok_or_else(|| crate::colima::cli::CliError::Parse(format!(
+        "No terminal found. Set TERMINAL to a terminal executable, or copy this command:\n{} ssh -p {}",
+        shell_word(&colima.get_program().to_string_lossy()), shell_word(profile),
+    )))?;
+    let mut child = linux_terminal_command(&terminal, &colima, profile)
+        .spawn()
+        .map_err(|source| crate::colima::cli::CliError::Spawn {
+            program: terminal.display().to_string(),
+            source,
+        })?;
+    // Terminal windows can live for hours. Reap without blocking the UI or executor.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// Docker context colima creates for a profile.
@@ -1492,6 +1607,98 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn linux_terminals_receive_literal_argument_lists() {
+        use std::ffi::OsString;
+        let binary = "/tmp/t52-colima with spaces";
+        let profile = "t52-a'b\\c$(printf injected)";
+        let mut colima = std::process::Command::new(binary);
+        colima.env("PATH", "/tmp/t52-bin:/usr/bin");
+        for (terminal, prefix) in [
+            ("x-terminal-emulator", vec!["-e"]),
+            ("gnome-terminal", vec!["--"]),
+            ("konsole", vec!["-e"]),
+            ("xfce4-terminal", vec!["--execute"]),
+            ("kitty", vec![]),
+            ("alacritty", vec!["-e"]),
+            ("wezterm", vec!["start", "--"]),
+            ("foot", vec![]),
+            ("xterm", vec!["-e"]),
+            ("custom-terminal", vec!["-e"]),
+        ] {
+            let command = linux_terminal_command(
+                &std::path::Path::new("/tmp/t52-terminal dir").join(terminal),
+                &colima,
+                profile,
+            );
+            let expected: Vec<OsString> = prefix
+                .into_iter()
+                .chain([binary, "ssh", "-p", profile])
+                .map(Into::into)
+                .collect();
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                expected,
+                "{terminal}"
+            );
+            assert_eq!(
+                command.get_program(),
+                std::path::Path::new("/tmp/t52-terminal dir").join(terminal)
+            );
+            assert!(command.get_envs().any(|(key, value)| key == "PATH"
+                && value == Some(std::ffi::OsStr::new("/tmp/t52-bin:/usr/bin"))));
+            assert_eq!(command.get_current_dir(), Some(std::path::Path::new("/")));
+        }
+    }
+
+    #[test]
+    fn linux_terminal_selection_respects_preference_path_order_and_executability() {
+        use std::ffi::OsStr;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("t52-terminals-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.as_os_str();
+        assert!(linux_terminal(None, Some(path)).is_none());
+        for name in [
+            "kitty",
+            "gnome-terminal",
+            "x-terminal-emulator",
+            "custom terminal",
+        ] {
+            let binary = dir.join(name);
+            std::fs::write(&binary, "").unwrap();
+            std::fs::set_permissions(binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        assert_eq!(
+            linux_terminal(None, Some(path)),
+            Some(dir.join("x-terminal-emulator"))
+        );
+        assert_eq!(
+            linux_terminal(Some(OsStr::new("")), Some(path)),
+            Some(dir.join("x-terminal-emulator"))
+        );
+        assert_eq!(
+            linux_terminal(Some(OsStr::new("kitty")), Some(path)),
+            Some(dir.join("kitty"))
+        );
+        assert_eq!(
+            linux_terminal(Some(dir.join("custom terminal").as_os_str()), None),
+            Some(dir.join("custom terminal"))
+        );
+        assert!(linux_terminal(Some(OsStr::new("missing")), Some(path)).is_none());
+        assert!(linux_terminal(Some(OsStr::new("kitty -e")), Some(path)).is_none());
+        std::fs::set_permissions(
+            dir.join("x-terminal-emulator"),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        assert_eq!(
+            linux_terminal(None, Some(path)),
+            Some(dir.join("gnome-terminal"))
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
