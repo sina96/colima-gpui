@@ -6,6 +6,16 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- **Linux:** Colima GPUI runs on Linux (x86_64 and arm64), packaged as an AppImage.
+  - Its own title bar with minimise, maximise and close buttons where the desktop doesn't draw one.
+  - A tray icon with the same menu as on macOS, and keep-running-in-the-tray (needs a StatusNotifierItem host; on GNOME, the AppIndicator extension).
+  - "SSH into VM" opens your terminal (`$TERMINAL`, GNOME Terminal, Konsole, kitty, Alacritty, WezTerm, foot, xterm and more).
+  - In-app updates replace the AppImage, with the same checks and rollback as on macOS.
+- **Debug log:** start the app with `COLIMA_GPUI_LOG=1` (or `debug`, `trace`) to print what it and GPUI are doing, for bug reports.
+- **Release checks:** each release is read back after publishing and checked the way an installed app reads it.
+
 ### Changed
 
 - The "update available" panel in Settings → About shows just the new version with **View on GitHub** and **Install and restart**; the release notes are on GitHub.

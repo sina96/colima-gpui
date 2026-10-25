@@ -811,6 +811,7 @@ dependencies = [
  "gpui",
  "gpui_platform",
  "ksni",
+ "log",
  "serde",
  "serde_json",
  "tray-icon",

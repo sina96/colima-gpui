@@ -67,7 +67,9 @@ body:
     attributes:
       label: Error messages or terminal output
       description: |
-        If you ran the app from a terminal (`just run` or `cargo run`), paste anything it printed.
+        Start the app from a terminal with the debug log on and paste what it prints:
+        macOS: `COLIMA_GPUI_LOG=1 "/Applications/Colima GPUI.app/Contents/MacOS/colima-gpui"`
+        Linux: `COLIMA_GPUI_LOG=1 ./Colima-GPUI-<version>-linux-<arch>.AppImage`
         Remove secrets, tokens and private host names first.
       render: text
     validations:

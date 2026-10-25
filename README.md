@@ -84,6 +84,8 @@
 
 To check a download, compare it with `SHA256SUMS` from the same release: `shasum -a 256 -c SHA256SUMS --ignore-missing`.
 
+**Something wrong?** Start the app from a terminal with `COLIMA_GPUI_LOG=1` set, e.g. `COLIMA_GPUI_LOG=1 "/Applications/Colima GPUI.app/Contents/MacOS/colima-gpui"` on macOS, and include what it prints in a [bug report](https://github.com/sina96/colima-gpui/issues/new?template=bug_report.yml).
+
 **Updating:** download the new version and replace the app in Applications. In-app updates are planned.
 
 ### Linux

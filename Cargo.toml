@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+# Already a GPUI dependency; used only by the opt-in debug log (COLIMA_GPUI_LOG).
+log = "0.4.34"
 # Official GPUI from Zed, pinned: GPUI is pre-1.0 and main breaks often.
 gpui = { git = "https://github.com/zed-industries/zed", rev = "d93bf740852672fb299fcbdba3af1d5fd0253e92" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "d93bf740852672fb299fcbdba3af1d5fd0253e92", features = ["font-kit", "runtime_shaders"] }
