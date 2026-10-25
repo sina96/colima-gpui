@@ -25,17 +25,25 @@ pub const KEY_CONTEXT: &str = "Settings";
 pub enum SettingsSection {
     Appearance,
     Behaviour,
+    Updates,
     Help,
     About,
 }
 
 impl SettingsSection {
-    const ALL: [SettingsSection; 4] = [Self::Appearance, Self::Behaviour, Self::Help, Self::About];
+    const ALL: [SettingsSection; 5] = [
+        Self::Appearance,
+        Self::Behaviour,
+        Self::Updates,
+        Self::Help,
+        Self::About,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
             Self::Behaviour => "Behaviour",
+            Self::Updates => "Updates",
             Self::Help => "Help",
             SettingsSection::About => "About",
         }
@@ -47,6 +55,8 @@ pub struct SettingsView {
     section: SettingsSection,
     focus_handle: FocusHandle,
     _observe: Subscription,
+    updater: Entity<super::update_badge::Updater>,
+    _update_observe: Subscription,
     docker_version: SharedString,
     colima_path: SharedString,
 }
@@ -82,7 +92,11 @@ impl SettingsView {
             .ok();
         })
         .detach();
+        let updater = super::update_badge::Updater::global(cx);
+        let update_observe = cx.observe(&updater, |_, _, cx| cx.notify());
         Self {
+            updater,
+            _update_observe: update_observe,
             store,
             section: SettingsSection::Appearance,
             focus_handle,
@@ -208,6 +222,110 @@ impl SettingsView {
         ]
     }
 
+    fn render_updates(&self, theme: &Theme, cx: &mut Context<Self>) -> Vec<AnyRow> {
+        let updater = self.updater.read(cx);
+        let mut rows = vec![row(
+            theme,
+            "Current version",
+            env!("CARGO_PKG_VERSION").into(),
+            false,
+        )];
+        if !crate::update::enabled() {
+            rows.push(
+                div()
+                    .py_3()
+                    .text_sm()
+                    .text_color(theme.text_muted)
+                    .child(crate::update::DISABLED)
+                    .into_any_element(),
+            );
+            if crate::update::REPO.is_some() {
+                rows.push(
+                    div()
+                        .text_sm()
+                        .child("Run the release app from its .app bundle to enable updates.")
+                        .into_any_element(),
+                );
+            }
+            return rows;
+        }
+        rows.push(row(
+            theme,
+            "Last checked",
+            updater.checked_text().into(),
+            false,
+        ));
+        rows.push(
+            div()
+                .py_2()
+                .text_sm()
+                .child(updater.result.clone())
+                .into_any_element(),
+        );
+        if let Some(error) = &updater.install_error {
+            rows.push(
+                div()
+                    .py_2()
+                    .text_sm()
+                    .text_color(theme.error)
+                    .child(error.clone())
+                    .into_any_element(),
+            );
+        }
+        let busy = updater.busy;
+        rows.push(
+            Button::new("update-check", if busy { "Working…" } else { "Check now" })
+                .disabled(busy)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.updater
+                        .update(cx, |updater, cx| updater.check(true, cx));
+                }))
+                .into_any_element(),
+        );
+        if let Some(release) = updater.release.clone() {
+            rows.push(
+                div()
+                    .pt_4()
+                    .text_sm()
+                    .child(format!("Available: {}", release.tag_name))
+                    .into_any_element(),
+            );
+            rows.push(
+                div()
+                    .id("release-notes")
+                    .max_h(px(220.))
+                    .overflow_y_scroll()
+                    .py_2()
+                    .text_sm()
+                    .child(release.body.unwrap_or_else(|| "No release notes".into()))
+                    .into_any_element(),
+            );
+            let url = release.html_url;
+            rows.push(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(Button::new("update-github", "View on GitHub").on_click(
+                        move |_, _, cx| {
+                            if url.starts_with("https://") {
+                                cx.open_url(&url);
+                            }
+                        },
+                    ))
+                    .child(
+                        Button::new("update-install", "Install and restart")
+                            .style(ButtonStyle::Primary)
+                            .disabled(busy)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.updater.update(cx, |updater, cx| updater.install(cx));
+                            })),
+                    )
+                    .into_any_element(),
+            );
+        }
+        rows
+    }
+
     fn render_behaviour(&self, theme: &Theme, cx: &mut Context<Self>) -> Vec<AnyRow> {
         let settings = settings::get(cx).clone();
         vec![
@@ -283,7 +401,7 @@ impl SettingsView {
                 setting_label(
                     "auto-updates-info",
                     "Automatic updates",
-                    "Check for updates automatically when update support is available.",
+                    "Check GitHub Releases at launch and every 12 hours. Installation always needs your approval.",
                 ),
                 Switch::new("auto-updates", settings.check_for_updates).on_toggle(cx.listener(
                     |_, on: &bool, _, cx| {
@@ -444,10 +562,17 @@ impl Focusable for SettingsView {
 
 impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.updater.update(cx, |updater, _| {
+            if updater.open_updates {
+                self.section = SettingsSection::Updates;
+                updater.open_updates = false;
+            }
+        });
         let theme = cx.theme().clone();
         let rows = match self.section {
             SettingsSection::Appearance => self.render_appearance(&theme, cx),
             SettingsSection::Behaviour => self.render_behaviour(&theme, cx),
+            SettingsSection::Updates => self.render_updates(&theme, cx),
             SettingsSection::Help => self.render_help(&theme),
             SettingsSection::About => self.render_about(&theme, cx),
         };

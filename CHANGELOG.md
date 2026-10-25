@@ -10,6 +10,8 @@ The first public version, 0.1.0, is being prepared.
 
 ### Added
 
+- **Updates:** release builds check GitHub Releases, show release notes, and install verified updates with restart and rollback.
+
 - **Profiles:**
   - Create, start, stop, restart, edit and delete Colima profiles, with live status and start-up logs.
   - The new-profile form covers CPU, memory, disk, runtime, VM type, architecture, mount type and Kubernetes.

@@ -83,6 +83,8 @@ jobs:
           tool: just
 
       - name: Build the app and the disk image
+        env:
+          COLIMA_GPUI_UPDATE_REPO: ${{ github.repository }}
         run: just dmg
 
       - name: Check the architecture
