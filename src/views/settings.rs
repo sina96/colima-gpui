@@ -49,6 +49,9 @@ pub struct SettingsView {
     _observe: Subscription,
     updater: Entity<super::update_badge::Updater>,
     _update_observe: Subscription,
+    /// The user clicked "Check for updates" on this page: show its result ("Up to date" or
+    /// why it failed) until they switch sections or close Settings.
+    show_check_result: bool,
     docker_version: SharedString,
     colima_path: SharedString,
 }
@@ -89,6 +92,7 @@ impl SettingsView {
         Self {
             updater,
             _update_observe: update_observe,
+            show_check_result: false,
             store,
             section: SettingsSection::Appearance,
             focus_handle,
@@ -218,7 +222,11 @@ impl SettingsView {
         let busy = updater.busy;
         // After a check: a tick when up to date, or why it failed. An available update shows
         // as the panel below instead.
-        let checked = updater.last_check.is_some() && updater.release.is_none() && !busy;
+        // Only for a check started here; an available update shows as the panel below.
+        let checked = self.show_check_result
+            && updater.last_check.is_some()
+            && updater.release.is_none()
+            && !busy;
         let up_to_date = checked && updater.last_error.is_none();
         let check_error = updater.last_error.clone().filter(|_| checked);
         let mut rows = vec![value_row(
@@ -240,6 +248,7 @@ impl SettingsView {
                             "Only release builds from GitHub can update themselves"
                         })
                         .on_click(cx.listener(|this, _, _, cx| {
+                            this.show_check_result = true;
                             this.updater
                                 .update(cx, |updater, cx| updater.check(true, cx));
                         })),
@@ -576,8 +585,10 @@ impl Focusable for SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.updater.update(cx, |updater, _| {
+            // Opened by the update badge or "Check for Updates…": show that check's result.
             if updater.open_updates {
                 self.section = SettingsSection::About;
+                self.show_check_result = true;
                 updater.open_updates = false;
             }
         });
@@ -611,6 +622,7 @@ impl Render for SettingsView {
                 .child(section.label())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.section = section;
+                    this.show_check_result = false;
                     cx.notify();
                 }))
         });
