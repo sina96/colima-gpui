@@ -1,0 +1,8 @@
+/target
+/dist
+.DS_Store
+
+# Local development notes, plans and agent workflow; not published.
+/.dev
+/.codex
+CLAUDE.local.md

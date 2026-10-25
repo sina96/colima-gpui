@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/sina96/colima-gpui/security/policy
+    about: Don't open a public issue. Read the security policy, then report the problem privately.
+  - name: A problem with Colima itself
+    url: https://github.com/abiosoft/colima/issues
+    about: Colima GPUI only drives the colima CLI. Report Colima, Lima or Docker problems to those projects.

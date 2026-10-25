@@ -1,0 +1,20 @@
+[package]
+name = "colima-gpui"
+version = "0.1.0"
+edition = "2024"
+description = "Native macOS app for managing Colima profiles and their Docker containers, built with GPUI"
+license = "MIT"
+repository = "https://github.com/sina96/colima-gpui"
+publish = false
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+# Official GPUI from Zed, pinned: GPUI is pre-1.0 and main breaks often.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "d93bf740852672fb299fcbdba3af1d5fd0253e92" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "d93bf740852672fb299fcbdba3af1d5fd0253e92", features = ["font-kit", "runtime_shaders"] }
+
+# Menu bar icon: the one exception to "official dependencies only" (see AGENTS.md).
+# Its objc2 0.6 / objc2-app-kit 0.3 are the versions GPUI already compiles.
+[target.'cfg(target_os = "macos")'.dependencies]
+tray-icon = { version = "0.26.1", default-features = false }

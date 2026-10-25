@@ -1,0 +1,14 @@
+# Colima generated scalar configuration shape
+cpu: 4
+memory: 8
+disk: 120
+runtime: containerd
+vmType: qemu
+arch: x86_64
+mountType: 9p
+kubernetes:
+  enabled: true
+network:
+  address: true
+mounts:
+  - location: ~

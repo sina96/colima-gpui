@@ -1,0 +1,12 @@
+# Opens pull requests when a new version of a SHA-pinned action in ci.yml is available.
+# Rust dependencies are updated by hand: GPUI is pinned to one Zed revision together with
+# the toolchain in rust-toolchain.toml (see AGENTS.md).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait a week after an action release; a bad release is usually pulled by then.
+    cooldown:
+      default-days: 7

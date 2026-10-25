@@ -1,0 +1,40 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "srgb:0.08627,0.10588,0.13333,1.00000",
+      "srgb:0.05098,0.06667,0.09020,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "layer-3-containers-green.svg",
+          "name": "layer-3-containers-green"
+        },
+        {
+          "image-name": "layer-2-runtime-white.svg",
+          "name": "layer-2-runtime-white"
+        },
+        {
+          "image-name": "layer-1-vm-grey.svg",
+          "name": "layer-1-vm-grey"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

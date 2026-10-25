@@ -1,0 +1,6 @@
+[toolchain]
+# Match the Zed revision gpui is pinned to.
+channel = "1.98.1"
+profile = "minimal"
+# CI and `just lint` need these.
+components = ["rustfmt", "clippy"]

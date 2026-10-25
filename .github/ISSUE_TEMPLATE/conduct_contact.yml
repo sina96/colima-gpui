@@ -1,0 +1,17 @@
+name: Conduct contact request
+description: Ask for a private way to report a Code of Conduct problem.
+title: "Conduct report: contact request"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Don't describe the incident here; this issue is public.
+        Submit this form as it is. The maintainer replies with a private way to send your report.
+  # Issue forms need at least one field besides markdown.
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I didn't include any details of the incident in this public issue.
+          required: true

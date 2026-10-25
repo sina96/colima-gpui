@@ -1,0 +1,56 @@
+name: CI
+
+# Runs on every pull request and on pushes to main, and cancels superseded runs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail on any compiler warning, as clippy does with -D warnings.
+  RUSTFLAGS: -D warnings
+
+# Actions are pinned to full commit SHAs, so a moved tag can't change them.
+# Dependabot (.github/dependabot.yml) proposes updates.
+jobs:
+  check:
+    name: Lint, test and build (macOS)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # rustup on the runner installs the toolchain and components from
+      # rust-toolchain.toml on first use; this prints the version it picked.
+      - name: Rust toolchain
+        run: rustup show active-toolchain
+
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: just
+
+      # GPUI is a large dependency; caching target/ keeps repeat runs fast.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Lint
+        run: just lint
+
+      - name: Test
+        run: just test
+
+      - name: Build examples
+        run: cargo build --examples
+
+      # The packaged app: release build, Info.plist check and ad-hoc signature.
+      - name: Build app bundle
+        run: just app

@@ -1,0 +1,11 @@
+pub mod ai;
+pub mod app;
+pub mod assets;
+pub mod colima;
+pub mod docker;
+pub mod links;
+pub mod settings;
+pub mod store;
+pub mod theme;
+pub mod ui;
+pub mod views;

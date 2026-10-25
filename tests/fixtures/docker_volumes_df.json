@@ -1,0 +1,28 @@
+{
+  "Volumes": [
+    {
+      "Availability": "N/A",
+      "Driver": "local",
+      "Group": "N/A",
+      "Labels": "t14-owned=true",
+      "Links": "1",
+      "Mountpoint": "/var/lib/docker/volumes/t14-used/_data",
+      "Name": "t14-used",
+      "Scope": "local",
+      "Size": "65.54kB",
+      "Status": "N/A"
+    },
+    {
+      "Availability": "N/A",
+      "Driver": "local",
+      "Group": "N/A",
+      "Labels": "t14-owned=true",
+      "Links": "0",
+      "Mountpoint": "/var/lib/docker/volumes/t14-unused/_data",
+      "Name": "t14-unused",
+      "Scope": "local",
+      "Size": "0B",
+      "Status": "N/A"
+    }
+  ]
+}

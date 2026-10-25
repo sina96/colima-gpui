@@ -1,0 +1,2 @@
+{"ID":"abc123","Names":"hello","Image":"nginx:latest","State":"running","Status":"Up 2 hours","Ports":"0.0.0.0:8080->80/tcp","CreatedAt":"2026-10-24 10:00:00 +0000 UTC","Command":"nginx -g daemon off;"}
+{"ID":"def456","Names":"worker","Image":"alpine:latest","State":"exited","Status":"Exited (0) 1 hour ago","Ports":"","CreatedAt":"2026-10-24 09:00:00 +0000 UTC","Command":"echo hello"}

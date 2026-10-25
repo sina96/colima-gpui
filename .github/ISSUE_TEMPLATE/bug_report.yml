@@ -1,0 +1,74 @@
+name: Bug report
+description: Tell us about a problem in Colima GPUI.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Search the open issues first, so the same problem isn't reported twice.
+        To report a security problem, don't use this form; read the security policy instead.
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu > About This Mac.
+      placeholder: "15.1"
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: Colima GPUI version
+      description: The status bar and Settings > About show it. If you built from source, add the commit.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: colima
+    attributes:
+      label: Colima version
+      description: Paste the output of `colima version`.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: profile
+    attributes:
+      label: Runtime and VM type
+      description: The profile's runtime (docker or containerd) and VM type (vz or qemu).
+      placeholder: "docker, vz"
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Select a running profile.
+        2. Open the Containers tab.
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What happened instead. Screenshots help, especially for UI problems.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error messages or terminal output
+      description: |
+        If you ran the app from a terminal (`just run` or `cargo run`), paste anything it printed.
+        Remove secrets, tokens and private host names first.
+      render: text
+    validations:
+      required: false

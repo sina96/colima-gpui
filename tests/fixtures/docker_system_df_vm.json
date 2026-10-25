@@ -1,0 +1,1 @@
+{"source":"colima ssh -p gpui-test -- df -B1 /", "stdout":"Filesystem       1B-blocks      Used   Available Use% Mounted on\n/dev/root      19682557952 905510912 18760269824   5% /\n"}

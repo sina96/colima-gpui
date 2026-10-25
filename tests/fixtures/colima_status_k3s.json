@@ -1,0 +1,1 @@
+{"display_name":"colima [profile=gpui-test]","driver":"macOS Virtualization.Framework","arch":"aarch64","runtime":"docker","mount_type":"virtiofs","docker_socket":"unix:///Users/user/.colima/gpui-test/docker.sock","containerd_socket":"unix:///Users/user/.colima/gpui-test/containerd.sock","kubernetes":true,"cpu":2,"memory":2147483648,"disk":10737418240}

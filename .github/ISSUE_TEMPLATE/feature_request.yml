@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a new feature or a change to Colima GPUI.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the idea. Read the [roadmap](https://github.com/sina96/colima-gpui/blob/main/docs/roadmap.md) and search the open issues first; it may already be planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The problem you want to solve, and when it happens.
+      placeholder: When I use more than one profile, I can't ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What Colima GPUI should do. A sketch or screenshot helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other solutions or workarounds you tried.
+    validations:
+      required: false

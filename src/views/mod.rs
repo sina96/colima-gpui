@@ -1,0 +1,16 @@
+pub mod ai;
+pub mod cleanup;
+pub mod container_detail;
+pub mod containers;
+pub mod image_detail;
+pub mod images;
+pub mod log_panel;
+pub mod log_selection;
+pub mod navigate;
+pub mod profile_detail;
+pub mod profile_form;
+pub mod profile_list;
+pub mod settings;
+pub mod update_badge;
+pub mod volume_detail;
+pub mod volumes;

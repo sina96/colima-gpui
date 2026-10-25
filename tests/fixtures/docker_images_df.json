@@ -1,0 +1,88 @@
+{
+  "Images": [
+    {
+      "Containers": "1",
+      "CreatedAt": "2026-10-16 18:00:07 +0200 CEST",
+      "CreatedSince": "8 days ago",
+      "Digest": "",
+      "ID": "sha256:96c660168dc5b2bb18ce715c3e9e798c7d07f7d495fce409c59e342ac3953c08",
+      "Repository": "ministackorg/ministack",
+      "SharedSize": "34B",
+      "Size": "263MB",
+      "Tag": "1.5.28",
+      "UniqueSize": "263.3MB"
+    },
+    {
+      "Containers": "0",
+      "CreatedAt": "2026-10-16 09:06:41 +0200 CEST",
+      "CreatedSince": "8 days ago",
+      "Digest": "",
+      "ID": "sha256:57b5ab1ca6619beb180174e2fccce04762470750669d043f544b4726d0582d07",
+      "Repository": "grafana/otel-lgtm",
+      "SharedSize": "33.08MB",
+      "Size": "3.49GB",
+      "Tag": "latest",
+      "UniqueSize": "3.458GB"
+    },
+    {
+      "Containers": "1",
+      "CreatedAt": "2026-10-09 09:07:47 +0200 CEST",
+      "CreatedSince": "2 weeks ago",
+      "Digest": "",
+      "ID": "sha256:57c04cbd8e7022f32bb84c4ac005d79baf8b08e2c5be44facf11f5f1f9944ba2",
+      "Repository": "grafana/otel-lgtm",
+      "SharedSize": "33.08MB",
+      "Size": "3.48GB",
+      "Tag": "0.36.0",
+      "UniqueSize": "3.447GB"
+    },
+    {
+      "Containers": "0",
+      "CreatedAt": "2026-10-06 03:35:25 +0200 CEST",
+      "CreatedSince": "2 weeks ago",
+      "Digest": "",
+      "ID": "sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336",
+      "Repository": "postgres",
+      "SharedSize": "0B",
+      "Size": "672MB",
+      "Tag": "latest",
+      "UniqueSize": "671.9MB"
+    },
+    {
+      "Containers": "1",
+      "CreatedAt": "2026-09-17 23:30:59 +0200 CEST",
+      "CreatedSince": "5 weeks ago",
+      "Digest": "",
+      "ID": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873",
+      "Repository": "postgres",
+      "SharedSize": "0B",
+      "Size": "425MB",
+      "Tag": "18-alpine",
+      "UniqueSize": "425.4MB"
+    },
+    {
+      "Containers": "1",
+      "CreatedAt": "2026-07-08 08:44:23 +0200 CEST",
+      "CreatedSince": "3 months ago",
+      "Digest": "",
+      "ID": "sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89",
+      "Repository": "mcr.microsoft.com/mssql/server",
+      "SharedSize": "0B",
+      "Size": "2.34GB",
+      "Tag": "2022-latest",
+      "UniqueSize": "2.339GB"
+    },
+    {
+      "Containers": "1",
+      "CreatedAt": "2026-03-23 22:34:00 +0100 CET",
+      "CreatedSince": "7 months ago",
+      "Digest": "",
+      "ID": "sha256:11a3eb1597e864c51b3f56733cb2e8a90bf0c284bfc05f9444d81c558bc848aa",
+      "Repository": "hello-world",
+      "SharedSize": "0B",
+      "Size": "22.6kB",
+      "Tag": "latest",
+      "UniqueSize": "22.57kB"
+    }
+  ]
+}

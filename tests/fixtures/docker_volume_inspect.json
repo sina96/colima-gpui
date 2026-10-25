@@ -1,0 +1,13 @@
+[
+    {
+        "CreatedAt": "2026-10-25T00:45:55+02:00",
+        "Driver": "local",
+        "Labels": {
+            "task": "t28"
+        },
+        "Mountpoint": "/var/lib/docker/volumes/t28-detail/_data",
+        "Name": "t28-detail",
+        "Options": null,
+        "Scope": "local"
+    }
+]

@@ -1,0 +1,6 @@
+[
+  {"source":"gpui-test: container prune -f --filter label=t15-cleanup-owner=t15-20261025", "stdout":"Deleted Containers:\n3f03582255dbbef54c8e7f91149cce17b4cf0e630c9a7612d4d45581c235daa4\n\nTotal reclaimed space: 4.096kB\n", "bytes":4096},
+  {"source":"gpui-test: volume prune -a -f --filter label=t15-cleanup-owner=t15-20261025", "stdout":"Deleted Volumes:\nt15-cleanup-fixture\n\nTotal reclaimed space: 0B\n", "bytes":0},
+  {"source":"gpui-test: image prune -a -f --filter label=t15-cleanup-owner=t15-20261025", "stdout":"Deleted Images:\nuntagged: t15-cleanup-fixture:latest\ndeleted: sha256:79646c8cc6dc900e8219d49a65f8b747a41f5c9e6f35d43a83734f52957d43c7\n\nTotal reclaimed space: 4.197MB\n", "bytes":4197000},
+  {"source":"BuildKit output format example", "stdout":"ID RECLAIMABLE SIZE LAST ACCESSED\nTotal:\t2.5MiB\n", "bytes":2621440}
+]

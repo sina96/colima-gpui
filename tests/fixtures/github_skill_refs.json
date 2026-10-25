@@ -1,0 +1,82 @@
+[
+  {
+    "name": "automation.md",
+    "path": "skills/references/automation.md",
+    "sha": "19dc822c17b6db9e42bbf4da22139816c00b3087",
+    "size": 4203,
+    "url": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/automation.md?ref=main",
+    "html_url": "https://github.com/abiosoft/colima/blob/main/skills/references/automation.md",
+    "git_url": "https://api.github.com/repos/abiosoft/colima/git/blobs/19dc822c17b6db9e42bbf4da22139816c00b3087",
+    "download_url": "https://raw.githubusercontent.com/abiosoft/colima/main/skills/references/automation.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/automation.md?ref=main",
+      "git": "https://api.github.com/repos/abiosoft/colima/git/blobs/19dc822c17b6db9e42bbf4da22139816c00b3087",
+      "html": "https://github.com/abiosoft/colima/blob/main/skills/references/automation.md"
+    }
+  },
+  {
+    "name": "configuration.md",
+    "path": "skills/references/configuration.md",
+    "sha": "49b1d685add5852cc75be1d08253d11a05511fea",
+    "size": 2659,
+    "url": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/configuration.md?ref=main",
+    "html_url": "https://github.com/abiosoft/colima/blob/main/skills/references/configuration.md",
+    "git_url": "https://api.github.com/repos/abiosoft/colima/git/blobs/49b1d685add5852cc75be1d08253d11a05511fea",
+    "download_url": "https://raw.githubusercontent.com/abiosoft/colima/main/skills/references/configuration.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/configuration.md?ref=main",
+      "git": "https://api.github.com/repos/abiosoft/colima/git/blobs/49b1d685add5852cc75be1d08253d11a05511fea",
+      "html": "https://github.com/abiosoft/colima/blob/main/skills/references/configuration.md"
+    }
+  },
+  {
+    "name": "install.md",
+    "path": "skills/references/install.md",
+    "sha": "94dc1a5475225c86142d595dc9549102aadc2c5c",
+    "size": 1513,
+    "url": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/install.md?ref=main",
+    "html_url": "https://github.com/abiosoft/colima/blob/main/skills/references/install.md",
+    "git_url": "https://api.github.com/repos/abiosoft/colima/git/blobs/94dc1a5475225c86142d595dc9549102aadc2c5c",
+    "download_url": "https://raw.githubusercontent.com/abiosoft/colima/main/skills/references/install.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/install.md?ref=main",
+      "git": "https://api.github.com/repos/abiosoft/colima/git/blobs/94dc1a5475225c86142d595dc9549102aadc2c5c",
+      "html": "https://github.com/abiosoft/colima/blob/main/skills/references/install.md"
+    }
+  },
+  {
+    "name": "runtimes.md",
+    "path": "skills/references/runtimes.md",
+    "sha": "a6c0077106599f6a53a25f29b8ccbd9a246a8558",
+    "size": 4845,
+    "url": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/runtimes.md?ref=main",
+    "html_url": "https://github.com/abiosoft/colima/blob/main/skills/references/runtimes.md",
+    "git_url": "https://api.github.com/repos/abiosoft/colima/git/blobs/a6c0077106599f6a53a25f29b8ccbd9a246a8558",
+    "download_url": "https://raw.githubusercontent.com/abiosoft/colima/main/skills/references/runtimes.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/runtimes.md?ref=main",
+      "git": "https://api.github.com/repos/abiosoft/colima/git/blobs/a6c0077106599f6a53a25f29b8ccbd9a246a8558",
+      "html": "https://github.com/abiosoft/colima/blob/main/skills/references/runtimes.md"
+    }
+  },
+  {
+    "name": "troubleshooting.md",
+    "path": "skills/references/troubleshooting.md",
+    "sha": "e35d74ce7d1eed3e0fa956afc8f1c8f5b3467f99",
+    "size": 3706,
+    "url": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/troubleshooting.md?ref=main",
+    "html_url": "https://github.com/abiosoft/colima/blob/main/skills/references/troubleshooting.md",
+    "git_url": "https://api.github.com/repos/abiosoft/colima/git/blobs/e35d74ce7d1eed3e0fa956afc8f1c8f5b3467f99",
+    "download_url": "https://raw.githubusercontent.com/abiosoft/colima/main/skills/references/troubleshooting.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/abiosoft/colima/contents/skills/references/troubleshooting.md?ref=main",
+      "git": "https://api.github.com/repos/abiosoft/colima/git/blobs/e35d74ce7d1eed3e0fa956afc8f1c8f5b3467f99",
+      "html": "https://github.com/abiosoft/colima/blob/main/skills/references/troubleshooting.md"
+    }
+  }
+]
