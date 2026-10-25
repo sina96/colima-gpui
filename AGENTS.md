@@ -64,7 +64,7 @@ Before using an API you are unsure of, grep for it there and copy the pattern fr
 just check   # cargo fmt --check, cargo clippy --all-targets -- -D warnings, cargo test
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same checks and builds the app bundle on every pull request.
+CI (`.github/workflows/ci.yml`) runs the same checks on every pull request, plus a quick check of the packaging files. It doesn't build the app bundle; run `just app` after changing `packaging/`.
 
 - **UI changes:** also run `cargo run` and check the feature by hand.
 - **Tests:** they parse captured CLI output stored in `tests/fixtures/`.

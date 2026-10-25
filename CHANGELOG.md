@@ -33,5 +33,7 @@ The first public version, 0.1.0, is being prepared.
 - **Settings:** poll interval, color profile, theme, menu bar and cleanup options.
 - **Help:** Settings → Help shows tiles linking to the documentation for Colima, Lima, Docker, Docker Compose, containerd, Kubernetes, k3s and kubectl; the Help menu lists them too. Settings → About has tiles for the source code, issues, contributing and the changelog.
 - **Kubernetes and containerd profiles:** profiles with Kubernetes on keep their Docker tabs, and the AI prompt names the kubectl context. containerd profiles show their status and disk usage.
+- **Kubernetes containers:** the Containers tab hides the containers Kubernetes runs (`k8s_…`) and says how many are hidden; the **Kubernetes** button shows them.
+- **Delete with data:** the delete dialog can also remove the profile's container data (`colima delete --data`), which recreating a profile with another runtime needs.
 
 [Unreleased]: https://github.com/sina96/colima-gpui/commits/main

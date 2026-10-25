@@ -1,7 +1,7 @@
 //! Modal layer following GPUI's pinned deferred/anchored popover example.
 use crate::{
     theme::ActiveTheme,
-    ui::{Button, ButtonStyle},
+    ui::{Button, ButtonStyle, Switch},
 };
 use gpui::{
     Context, EventEmitter, FocusHandle, SharedString, Window, anchored, deferred, div, point,
@@ -23,6 +23,9 @@ pub struct ConfirmDialog {
     confirm_focus: FocusHandle,
     previous_focus: Option<FocusHandle>,
     open: bool,
+    /// An optional extra choice shown as a switch, off each time the dialog opens.
+    option: Option<SharedString>,
+    option_on: bool,
 }
 impl EventEmitter<DialogResult> for ConfirmDialog {}
 impl ConfirmDialog {
@@ -40,7 +43,18 @@ impl ConfirmDialog {
             confirm_focus: cx.focus_handle(),
             previous_focus: None,
             open: false,
+            option: None,
+            option_on: false,
         }
+    }
+    /// Adds a switch with this label, e.g. "Also delete container data". Read it with
+    /// [`ConfirmDialog::option_on`] when the dialog reports `Confirmed`.
+    pub fn option(mut self, label: impl Into<SharedString>) -> Self {
+        self.option = Some(label.into());
+        self
+    }
+    pub fn option_on(&self) -> bool {
+        self.option_on
     }
     pub fn confirm_label(mut self, label: impl Into<SharedString>) -> Self {
         self.confirm_label = label.into();
@@ -49,6 +63,7 @@ impl ConfirmDialog {
     pub fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.previous_focus = window.focused(cx);
         self.open = true;
+        self.option_on = false;
         window.focus(&self.cancel_focus, cx);
         cx.notify();
     }
@@ -120,6 +135,24 @@ impl Render for ConfirmDialog {
                                     .child(
                                         div().text_color(t.text_muted).child(self.message.clone()),
                                     )
+                                    .when_some(self.option.clone(), |el, label| {
+                                        let on = self.option_on;
+                                        let toggle = cx.listener(|this: &mut Self, _, _, cx| {
+                                            this.option_on = !this.option_on;
+                                            cx.notify();
+                                        });
+                                        el.child(
+                                            div()
+                                                .id("confirm-option")
+                                                .flex()
+                                                .items_center()
+                                                .gap_2()
+                                                .cursor_pointer()
+                                                .child(Switch::new("confirm-option-switch", on))
+                                                .child(label)
+                                                .on_click(toggle),
+                                        )
+                                    })
                                     .child(
                                         div()
                                             .flex()

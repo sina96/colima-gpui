@@ -12,7 +12,9 @@ use super::navigate::{self, Navigate};
 use crate::docker::{commands, model::Container, stats};
 use crate::theme::ActiveTheme;
 use crate::ui::dialog::{ConfirmDialog, DialogResult};
-use crate::ui::{Button, Column, IconName, MenuButton, MenuItem, StatusDot, Table, TextCell};
+use crate::ui::{
+    Button, ButtonStyle, Column, IconName, MenuButton, MenuItem, StatusDot, Table, TextCell,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Action {
@@ -43,6 +45,9 @@ pub struct ContainersView {
     /// Focus the detail page on the next render; set where no `Window` is at hand.
     pub(super) focus_detail: bool,
     confirm: Option<(Entity<ConfirmDialog>, Subscription)>,
+    /// List the containers Kubernetes runs (`k8s_…`); hidden by default as they're mostly
+    /// system pods and their pause containers.
+    show_kubernetes: bool,
     _poll: Task<()>,
 }
 
@@ -85,6 +90,7 @@ impl ContainersView {
             pending_target: None,
             focus_detail: false,
             confirm: None,
+            show_kubernetes: false,
             _poll: poll,
         }
     }
@@ -315,8 +321,31 @@ impl ContainersView {
         ]
     }
 
+    fn kubernetes_count(&self) -> usize {
+        self.containers.iter().filter(|c| c.is_kubernetes()).count()
+    }
+
+    /// "5 containers", or "5 containers · 6 Kubernetes hidden" while they're filtered out.
+    fn count_label(&self) -> String {
+        let kubernetes = self.kubernetes_count();
+        if self.show_kubernetes || kubernetes == 0 {
+            format!("{} containers", self.containers.len())
+        } else {
+            format!(
+                "{} containers · {kubernetes} Kubernetes hidden",
+                self.containers.len() - kubernetes
+            )
+        }
+    }
+
     fn table(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let rows = Rc::new(self.containers.clone());
+        let rows = Rc::new(
+            self.containers
+                .iter()
+                .filter(|c| self.show_kubernetes || !c.is_kubernetes())
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         let cells = rows.clone();
         let view = cx.entity().downgrade();
         let click_view = view.clone();
@@ -370,6 +399,7 @@ impl Render for ContainersView {
                 .into_any_element();
         }
 
+        let kubernetes = self.kubernetes_count();
         div()
             .flex()
             .flex_col()
@@ -388,14 +418,39 @@ impl Render for ContainersView {
                     .px_2()
                     .border_b_1()
                     .border_color(theme.border_variant)
-                    .child(format!("{} containers", self.containers.len()))
+                    .child(self.count_label())
                     .child(
-                        Button::new("refresh-containers", "Refresh")
-                            .loading(self.refreshing)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.error = None;
-                                this.refresh(cx);
-                            })),
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .when(kubernetes > 0, |el| {
+                                el.child(
+                                    Button::new("show-kubernetes", "Kubernetes")
+                                        .style(if self.show_kubernetes {
+                                            ButtonStyle::Selected
+                                        } else {
+                                            ButtonStyle::Ghost
+                                        })
+                                        .tooltip(if self.show_kubernetes {
+                                            "Hide the containers Kubernetes runs"
+                                        } else {
+                                            "Show the containers Kubernetes runs"
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.show_kubernetes = !this.show_kubernetes;
+                                            cx.notify();
+                                        })),
+                                )
+                            })
+                            .child(
+                                Button::new("refresh-containers", "Refresh")
+                                    .loading(self.refreshing)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.error = None;
+                                        this.refresh(cx);
+                                    })),
+                            ),
                     ),
             )
             .when_some(

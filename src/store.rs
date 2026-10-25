@@ -40,6 +40,8 @@ pub enum Op {
     Stop,
     Restart,
     Delete,
+    /// `colima delete --data`: also removes the profile's container data disk.
+    DeleteWithData,
 }
 
 impl Op {
@@ -48,8 +50,12 @@ impl Op {
             Op::Start => "Starting…",
             Op::Stop => "Stopping…",
             Op::Restart => "Restarting…",
-            Op::Delete => "Deleting…",
+            Op::Delete | Op::DeleteWithData => "Deleting…",
         }
+    }
+
+    pub fn is_delete(self) -> bool {
+        matches!(self, Op::Delete | Op::DeleteWithData)
     }
 }
 
@@ -336,6 +342,7 @@ impl ProfileStore {
                 Op::Stop => commands::stop(&name),
                 Op::Restart => commands::restart(&name),
                 Op::Delete => commands::delete(&name, false),
+                Op::DeleteWithData => commands::delete(&name, true),
             }
         });
         cx.spawn(async move |this, cx| {
@@ -343,7 +350,7 @@ impl ProfileStore {
             this.update(cx, |this, cx| {
                 this.busy.remove(&profile);
                 this.statuses.remove(&profile);
-                if op == Op::Delete && result.is_ok() {
+                if op.is_delete() && result.is_ok() {
                     this.logs.remove(&profile);
                 }
                 if let Err(e) = result {

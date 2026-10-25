@@ -75,7 +75,7 @@ Never test destructive actions on a profile you rely on, such as `default`.
 4. If users see the change, add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
 5. Open the pull request and fill in the template. Add screenshots for UI changes.
 
-CI runs `just lint`, `just test` and builds the app bundle on macOS. A pull request needs a green CI run before it's merged.
+CI runs `just lint` and `just test` on macOS, builds the examples and checks the packaging files. It doesn't build the app bundle, so run `just app` yourself if you change anything in `packaging/`. A pull request needs a green CI run before it's merged.
 
 ## License
 
