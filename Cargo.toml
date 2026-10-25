@@ -22,3 +22,4 @@ tray-icon = { version = "0.26.1", default-features = false }
 # Linux: GPUI's Wayland and X11 backends (the features only exist for this target).
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "d93bf740852672fb299fcbdba3af1d5fd0253e92", features = ["wayland", "x11"] }
+ksni = { version = "0.3.3", default-features = false, features = ["blocking", "async-io"] }
