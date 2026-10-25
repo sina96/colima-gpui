@@ -25,6 +25,8 @@ Xcode's system components installed (open Xcode and let it install them); withou
 uses `AppIcon.icns`. Building the
 app itself (`just app`) never needs Xcode.
 
+Releases are built by `.github/workflows/release.yml` from a version tag, with `just dmg` on an Apple silicon and an Intel runner; see "Releasing" in `CONTRIBUTING.md`. `release-notes.sh <version>` prints the changelog section the release uses as its notes.
+
 For the Finder launch check, open `dist` in Finder and double-click `Colima GPUI.app`.
 Use only the disposable `gpui-test` profile for start/stop checks. The shared
 runner resolves Homebrew/Nix binaries and supplies the child's PATH; Finder need

@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/Rust-1.98-B7410E?logo=rust&logoColor=white" alt="Rust 1.98">
   <img src="https://img.shields.io/badge/GPUI-Zed-084CCF?logo=zedindustries&logoColor=white" alt="Built with GPUI">
   <a href="https://github.com/abiosoft/colima"><img src="https://img.shields.io/badge/Colima-0.10-22c55e" alt="Colima 0.10"></a>
+  <a href="https://github.com/sina96/colima-gpui/releases/latest"><img src="https://img.shields.io/github/v/release/sina96/colima-gpui?label=release" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
@@ -23,7 +24,7 @@
 </p>
 -->
 
-> **Status:** early and under active development. macOS only for now; Linux is planned. There are no prebuilt downloads yet, so [build it from source](#build-from-source).
+> **Status:** early and under active development. macOS only for now; Linux is planned. [Download it](#install) or [build it from source](#build-from-source).
 >
 > Colima GPUI is an independent project. It isn't affiliated with or endorsed by the Colima or Zed projects.
 
@@ -52,6 +53,37 @@
   - Each comes in light and dark, following the system or set by hand.
   - Full menu bar with keyboard shortcuts (⌘1–⌘6 switch tabs, ⌘R refreshes, ⌘, opens Settings).
 
+## Install
+
+1. Install [Colima](https://github.com/abiosoft/colima#installation) and the Docker CLI if you haven't:
+
+   ```sh
+   brew install colima docker
+   ```
+
+2. Download the latest `.dmg` from [Releases](https://github.com/sina96/colima-gpui/releases/latest) for your Mac:
+   - `Colima-GPUI-<version>-macos-arm64.dmg` for Apple silicon (M1 and later)
+   - `Colima-GPUI-<version>-macos-x86_64.dmg` for Intel
+
+   Not sure which you have? Apple menu → About This Mac: "Chip: Apple M…" means arm64, "Processor: Intel" means x86_64.
+
+3. Open the `.dmg` and drag **Colima GPUI** to **Applications**.
+
+4. **First launch.** Colima GPUI isn't notarized by Apple yet, so macOS blocks it the first time ("Apple could not verify…"):
+   1. Open it from Applications once and close the warning.
+   2. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to Colima GPUI.
+   3. Confirm with your password or Touch ID. From then on it opens normally.
+
+   Or, from the terminal, remove the download quarantine instead:
+
+   ```sh
+   xattr -dr com.apple.quarantine "/Applications/Colima GPUI.app"
+   ```
+
+To check a download, compare it with `SHA256SUMS` from the same release: `shasum -a 256 -c SHA256SUMS --ignore-missing`.
+
+**Updating:** download the new version and replace the app in Applications. In-app updates are planned.
+
 ## Requirements
 
 - macOS 11 or later. Colima itself may need a newer macOS, depending on the VM type.
@@ -76,7 +108,7 @@ open "dist/Colima GPUI.app"
 
 `just dmg` builds a disk image as well, and `just run` starts a debug build without packaging.
 
-The app is ad-hoc signed. The first time you open it, macOS may ask you to confirm in System Settings → Privacy & Security. See [`packaging/README.md`](packaging/README.md) for details.
+An app you build yourself isn't quarantined, so macOS opens it without the warning above. See [`packaging/README.md`](packaging/README.md) for details.
 
 ## Contributing
 
