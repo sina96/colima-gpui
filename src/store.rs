@@ -453,14 +453,15 @@ impl ProfileStore {
 }
 
 /// The user's poll interval, or the default before settings are loaded.
-/// The profiles in `wanted` that exist and aren't running, in `wanted`'s order.
+/// The profiles in `wanted` that exist and are stopped, in `wanted`'s order. A profile in
+/// another state (e.g. Broken) is left alone.
 fn profiles_to_start(instances: &[Instance], wanted: &[String]) -> Vec<String> {
     wanted
         .iter()
         .filter(|name| {
             instances
                 .iter()
-                .any(|i| &i.name == *name && !i.is_running())
+                .any(|i| &i.name == *name && i.status == "Stopped")
         })
         .cloned()
         .collect()
@@ -495,8 +496,9 @@ mod tests {
             instance("work", "Running"),
             instance("gpui-test", "Stopped"),
             instance("other", "Stopped"),
+            instance("broken", "Broken"),
         ];
-        let wanted = ["gpui-test", "work", "deleted", "default"].map(String::from);
+        let wanted = ["gpui-test", "work", "deleted", "broken", "default"].map(String::from);
         assert_eq!(
             profiles_to_start(&instances, &wanted),
             ["gpui-test", "default"]

@@ -84,8 +84,18 @@ fn valid_repo(repo: &str) -> bool {
                     .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
         })
 }
+/// `COLIMA_GPUI_UPDATE_API` replaces the GitHub API for testing against a local server. It
+/// works only in debug builds and in builds compiled with `COLIMA_GPUI_UPDATE_TEST` set (for
+/// the bundled end-to-end test); release builds from the workflow ignore it.
+fn api_override() -> Option<String> {
+    if cfg!(debug_assertions) || option_env!("COLIMA_GPUI_UPDATE_TEST").is_some() {
+        std::env::var("COLIMA_GPUI_UPDATE_API").ok()
+    } else {
+        None
+    }
+}
 fn curl(url: &str, output: Option<&Path>) -> Result<Vec<u8>, String> {
-    let mock = std::env::var("COLIMA_GPUI_UPDATE_API").ok();
+    let mock = api_override();
     if !url.starts_with("https://")
         && !mock.as_ref().is_some_and(|base| {
             (base.starts_with("http://127.0.0.1:") || base.starts_with("http://localhost:"))
@@ -130,8 +140,7 @@ pub fn check() -> Result<Option<Release>, String> {
     if !enabled() {
         return Err(DISABLED.into());
     }
-    let base =
-        std::env::var("COLIMA_GPUI_UPDATE_API").unwrap_or_else(|_| "https://api.github.com".into());
+    let base = api_override().unwrap_or_else(|| "https://api.github.com".into());
     let data = curl(
         &format!(
             "{}/repos/{}/releases/latest",
@@ -176,7 +185,9 @@ impl Drop for Temp {
     }
 }
 fn private_temp() -> Result<Temp, String> {
-    let output = cli::run("/usr/bin/mktemp", &["-d", "-t", "colima-gpui-update"])
+    // An explicit template with X's works with both BSD and GNU mktemp.
+    let template = std::env::temp_dir().join("colima-gpui-update.XXXXXXXX");
+    let output = cli::run("/usr/bin/mktemp", &["-d", &template.to_string_lossy()])
         .map_err(|e| e.to_string())?;
     Ok(Temp(PathBuf::from(
         String::from_utf8_lossy(&output.stdout).trim(),

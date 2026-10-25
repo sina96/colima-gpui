@@ -28,8 +28,8 @@ rollback() {
     # Keep the private log for diagnosis of a failed handoff.
     exit 1
 }
-[ ! -e "$old" ] && [ ! -L "$old" ] || { /usr/bin/open -n "$app" --args --colima-update-failed; exit 1; }
-/bin/mv "$app" "$old" || { /usr/bin/open -n "$app" --args --colima-update-failed; exit 1; }
+[ ! -e "$old" ] && [ ! -L "$old" ] || { /bin/rm -rf "$staged"; /usr/bin/open -n "$app" --args --colima-update-failed; exit 1; }
+/bin/mv "$app" "$old" || { /bin/rm -rf "$staged"; /usr/bin/open -n "$app" --args --colima-update-failed; exit 1; }
 /bin/mv "$staged" "$app" || rollback "Could not move the new app into place."
 /usr/bin/open -n "$app" --args --colima-update-ready "$ready" || rollback "macOS could not open the new app."
 i=0

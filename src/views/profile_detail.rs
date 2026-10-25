@@ -1098,7 +1098,7 @@ impl VmUsageView {
                         }
                         Err(error) => {
                             this.usage = None;
-                            this.error = Some(error.to_string());
+                            this.error = Some(crate::colima::cli::describe(&error));
                         }
                     }
                     match disk {
@@ -1108,7 +1108,7 @@ impl VmUsageView {
                         }
                         Err(error) => {
                             this.disk = None;
-                            this.disk_error = Some(error.to_string());
+                            this.disk_error = Some(crate::colima::cli::describe(&error));
                         }
                     }
                     match reclaimable {

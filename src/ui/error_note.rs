@@ -42,11 +42,9 @@ impl RenderOnce for ErrorNote {
             }
             _ => self.message.clone(),
         };
-        let group = SharedString::from(format!("error-note-{:?}", self.id));
         let copied = full.clone();
         div()
             .id(self.id.clone())
-            .group(group.clone())
             .flex()
             .items_center()
             .gap_1p5()
@@ -64,18 +62,15 @@ impl RenderOnce for ErrorNote {
                     .child(self.message),
             )
             .tooltip(tooltip(full))
+            // Always shown, so keyboard users can reach it too.
             .child(
-                div()
-                    .flex_none()
-                    .invisible()
-                    .group_hover(group, |s| s.visible())
-                    .child(
-                        IconButton::new((self.id, "copy"), IconName::Copy)
-                            .tooltip("Copy the error")
-                            .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string()))
-                            }),
-                    ),
+                div().flex_none().child(
+                    IconButton::new((self.id, "copy"), IconName::Copy)
+                        .tooltip("Copy the error")
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string()))
+                        }),
+                ),
             )
     }
 }

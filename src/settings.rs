@@ -78,9 +78,11 @@ impl Settings {
     }
 
     /// Adds or removes `profile` from the profiles started when the app opens.
+    /// Turning it on again keeps the profile's place in the order.
     pub fn set_start_on_open(&mut self, profile: &str, on: bool) {
-        self.start_on_open.retain(|name| name != profile);
-        if on {
+        if !on {
+            self.start_on_open.retain(|name| name != profile);
+        } else if !self.starts_on_open(profile) {
             self.start_on_open.push(profile.to_owned());
         }
     }
@@ -188,6 +190,9 @@ mod tests {
         settings.set_start_on_open("work", true);
         assert_eq!(settings.start_on_open, ["default", "work"]);
         assert!(settings.starts_on_open("work"));
+        // Turning it on again keeps its place.
+        settings.set_start_on_open("default", true);
+        assert_eq!(settings.start_on_open, ["default", "work"]);
         settings.set_start_on_open("default", false);
         assert_eq!(settings.start_on_open, ["work"]);
         assert!(!settings.starts_on_open("default"));

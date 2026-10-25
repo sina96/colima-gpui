@@ -41,6 +41,15 @@ impl CliError {
     }
 }
 
+/// The short message and, when there is one, the command's full error output: for an
+/// [`crate::ui::ErrorNote`]'s details.
+pub fn describe(error: &CliError) -> String {
+    match error.details() {
+        Some(details) => format!("{error}\n\n{details}"),
+        None => error.to_string(),
+    }
+}
+
 /// Shortens error output for display. Colima logs like
 /// `time="…" level=fatal msg="exit status 1"`; this keeps each line's `msg`, and drops a bare
 /// "exit status N" when another line says what went wrong.
@@ -141,7 +150,21 @@ pub fn command(program: &str) -> Command {
     } else {
         None
     };
+    // The child runs in `/` (below), so relative paths must be made absolute against our own
+    // working directory first: a relative COLIMA_BIN, program or PATH entry.
+    let cwd = std::env::current_dir().ok();
+    let absolute = |path: PathBuf| match &cwd {
+        Some(cwd) if path.is_relative() => cwd.join(path),
+        _ => path,
+    };
+    let dirs: Vec<PathBuf> = dirs.into_iter().map(absolute).collect();
     let binary = resolve_binary(program, override_path.as_deref(), &dirs);
+    // A bare name that wasn't found stays bare, for the child's PATH lookup.
+    let binary = if binary.components().count() > 1 {
+        absolute(binary)
+    } else {
+        binary
+    };
     let mut command = Command::new(binary);
     let path: OsString =
         std::env::join_paths(dirs).expect("search directories contain no path separator");
@@ -200,6 +223,9 @@ mod tests {
         };
         assert!(error.to_string().starts_with("colima failed: bash: line 1"));
         assert!(error.details().unwrap().contains("level=fatal"));
+        let described = describe(&error);
+        assert!(described.starts_with("colima failed: bash: line 1"));
+        assert!(described.contains("level=fatal msg="));
     }
 
     #[test]
@@ -207,6 +233,15 @@ mod tests {
         assert_eq!(
             command("colima").get_current_dir(),
             Some(std::path::Path::new("/"))
+        );
+        // A relative program is resolved against our directory, not the child's `/`.
+        let program = PathBuf::from(command("bin/tool").get_program());
+        assert!(program.is_absolute());
+        assert!(program.ends_with("bin/tool"));
+        // A bare name that isn't found is left to the child's PATH lookup.
+        assert_eq!(
+            command("no-such-tool-colima-gpui").get_program(),
+            "no-such-tool-colima-gpui"
         );
     }
 
