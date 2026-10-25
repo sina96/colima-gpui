@@ -1,0 +1,11 @@
+{
+  "tag_name": "v0.2.0",
+  "name": "Colima GPUI 0.2.0",
+  "body": "Hand-written release contract fixture; replace after v0.1.0 is published.",
+  "html_url": "https://github.com/sina96/colima-gpui/releases/tag/v0.2.0",
+  "assets": [
+    {"name":"Colima-GPUI-0.2.0-macos-arm64.zip","browser_download_url":"https://github.com/sina96/colima-gpui/releases/download/v0.2.0/Colima-GPUI-0.2.0-macos-arm64.zip","size":123},
+    {"name":"Colima-GPUI-0.2.0-macos-x86_64.zip","browser_download_url":"https://github.com/sina96/colima-gpui/releases/download/v0.2.0/Colima-GPUI-0.2.0-macos-x86_64.zip","size":456},
+    {"name":"SHA256SUMS","browser_download_url":"https://github.com/sina96/colima-gpui/releases/download/v0.2.0/SHA256SUMS","size":200}
+  ]
+}

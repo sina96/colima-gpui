@@ -11,9 +11,9 @@ use colima_gpui::{
         UI_FONT,
     },
     ui::{
-        self, Button, ButtonStyle, CardGrid, DetailCard, DetailPage, Field, Icon, IconButton,
-        IconName, InfoTip, Link, MenuButton, MenuItem, Meter, Segment, SizeBar, StackedBar,
-        StatusDot, Switch,
+        self, Button, ButtonStyle, CardGrid, DetailCard, DetailPage, ErrorNote, Field, Icon,
+        IconButton, IconName, InfoTip, Link, MenuButton, MenuItem, Meter, Segment, SizeBar,
+        StackedBar, StatusDot, Switch,
         badge::Badge,
         button::ButtonSize,
         card::Card,
@@ -222,6 +222,20 @@ impl Gallery {
                             )
                             .child(Field::new("PATH", "/usr/local/bin:/usr/bin:/bin").mono().wrap()),
                     ),
+            ))
+            .child(Card::new(
+                "ErrorNote · hover for the full error, then copy it",
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(ErrorNote::new("gallery-error", "VM usage unavailable").details(
+                        "colima failed: bash: line 1: cd: /Users/me/project: No such file or directory",
+                    ))
+                    .child(ErrorNote::new(
+                        "gallery-error-short",
+                        "docker failed: Cannot connect to the Docker daemon at unix:///Users/me/.colima/default/docker.sock",
+                    )),
             ))
             .child(Card::new(
                 "Switch (on, off, disabled)",

@@ -11,7 +11,7 @@ use crate::theme::{ActiveTheme, MONO_FONT, Theme};
 use crate::ui::badge::Badge;
 use crate::ui::button::ButtonSize;
 use crate::ui::dialog::{ConfirmDialog, DialogResult};
-use crate::ui::{Button, ButtonStyle, Icon, IconButton, IconName, Meter};
+use crate::ui::{Button, ButtonStyle, ErrorNote, Icon, IconButton, IconName, Meter, Switch};
 use crate::views::ai::AiView;
 use crate::views::cleanup::CleanupView;
 use crate::views::containers::ContainersView;
@@ -616,7 +616,8 @@ impl ProfileDetail {
                     "Mount",
                     unavailable(status.as_ref().map(|s| s.mount_type.as_str())),
                     false,
-                )),
+                ))
+                .child(start_on_open_row(&theme, &inst.name, cx)),
         );
         let docker_body = div().flex().flex_col().min_w_0().gap_1();
         let docker_body = if docker {
@@ -761,7 +762,12 @@ impl ProfileDetail {
                     reclaimable_error
                         .into_iter()
                         .chain(ssh_error)
-                        .map(|error| div().text_xs().text_color(theme.error).child(error)),
+                        .enumerate()
+                        .map(|(ix, error)| {
+                            div()
+                                .text_xs()
+                                .child(ErrorNote::new(("quick-action-error", ix), error))
+                        }),
                 ),
         );
         let log = self.render_overview_log(&inst.name, cx);
@@ -1092,7 +1098,7 @@ impl VmUsageView {
                         }
                         Err(error) => {
                             this.usage = None;
-                            this.error = Some(format!("VM usage: {error}"));
+                            this.error = Some(crate::colima::cli::describe(&error));
                         }
                     }
                     match disk {
@@ -1102,7 +1108,7 @@ impl VmUsageView {
                         }
                         Err(error) => {
                             this.disk = None;
-                            this.disk_error = Some(format!("VM disk: {error}"));
+                            this.disk_error = Some(crate::colima::cli::describe(&error));
                         }
                     }
                     match reclaimable {
@@ -1203,13 +1209,17 @@ impl Render for VmUsageView {
                         usage.load[0],
                         f64::from(self.cpus.max(1)),
                     )),
-                None => el.child(div().text_color(theme.text_muted).child(
-                    if self.error.is_some() {
-                        "VM usage unavailable"
-                    } else {
-                        "Loading VM usage…"
-                    },
-                )),
+                None => match &self.error {
+                    Some(error) => el.child(
+                        ErrorNote::new("vm-usage-error", "VM usage unavailable")
+                            .details(error.clone()),
+                    ),
+                    None => el.child(
+                        div()
+                            .text_color(theme.text_muted)
+                            .child("Loading VM usage…"),
+                    ),
+                },
             })
             .map(|el| match &self.disk {
                 Some(disk) => el.child(Meter::new(
@@ -1222,14 +1232,18 @@ impl Render for VmUsageView {
                     disk.used as f64,
                     disk.size as f64,
                 )),
-                None => el.child(div().text_color(theme.text_muted).child("Disk unavailable")),
+                None => match &self.disk_error {
+                    Some(error) => el.child(
+                        ErrorNote::new("vm-disk-error", "Disk usage unavailable")
+                            .details(error.clone()),
+                    ),
+                    None => el.child(
+                        div()
+                            .text_color(theme.text_muted)
+                            .child("Loading disk usage…"),
+                    ),
+                },
             })
-            .children(
-                self.error
-                    .iter()
-                    .chain(self.disk_error.iter())
-                    .map(|error| div().text_color(theme.error).child(error.clone())),
-            )
     }
 }
 
@@ -1255,6 +1269,34 @@ fn overview_card(theme: &Theme, title: &str, icon: IconName, body: impl IntoElem
                 .child(title.to_owned()),
         )
         .child(body)
+        .into_any_element()
+}
+
+/// "Start when Colima GPUI opens": a per-profile switch, stored in the app's settings.
+fn start_on_open_row(theme: &Theme, profile: &str, cx: &mut Context<ProfileDetail>) -> AnyElement {
+    let on = crate::settings::get(cx).starts_on_open(profile);
+    let profile = profile.to_owned();
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_2()
+        .pt_1()
+        .text_xs()
+        .child(
+            div()
+                .text_color(theme.text_muted)
+                .child("Start when Colima GPUI opens"),
+        )
+        .child(
+            Switch::new("start-on-open", on)
+                .tooltip("If this profile is stopped, start it whenever Colima GPUI opens")
+                .on_toggle(cx.listener(move |_, on: &bool, _, cx| {
+                    let on = *on;
+                    crate::settings::update(cx, |s| s.set_start_on_open(&profile, on));
+                    cx.notify();
+                })),
+        )
         .into_any_element()
 }
 

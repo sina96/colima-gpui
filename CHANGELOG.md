@@ -10,6 +10,10 @@ The first public version, 0.1.0, is being prepared.
 
 ### Added
 
+- **Updates:** release builds check GitHub Releases at launch and every 12 hours (or on "Check for updates" in Settings → About and the app menu). An available update shows as a badge in the status bar; Settings → About shows its notes and installs it, verified, with restart and rollback.
+- **Errors:** shown as one line with an alert icon; hover for the full error, with a button to copy it.
+- **Start profiles when the app opens:** turn on "Start when Colima GPUI opens" in a profile's Overview, and the app starts it at launch if it's stopped.
+
 - **Profiles:**
   - Create, start, stop, restart, edit and delete Colima profiles, with live status and start-up logs.
   - The new-profile form covers CPU, memory, disk, runtime, VM type, architecture, mount type and Kubernetes.

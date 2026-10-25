@@ -12,6 +12,7 @@ pub enum IconName {
     Check,
     ChevronDown,
     ChevronRight,
+    CircleAlert,
     Copy,
     Cpu,
     Database,
@@ -41,13 +42,14 @@ pub enum IconName {
 }
 
 impl IconName {
-    pub const ALL: [IconName; 32] = [
+    pub const ALL: [IconName; 33] = [
         IconName::ArrowLeft,
         IconName::Box,
         IconName::Bug,
         IconName::Check,
         IconName::ChevronDown,
         IconName::ChevronRight,
+        IconName::CircleAlert,
         IconName::Copy,
         IconName::Cpu,
         IconName::Database,
@@ -108,6 +110,7 @@ impl IconName {
             IconName::Tag => "icons/tag.svg",
             IconName::Terminal => "icons/terminal.svg",
             IconName::Bug => "icons/bug.svg",
+            IconName::CircleAlert => "icons/circle-alert.svg",
             IconName::GitPullRequest => "icons/git-pull-request.svg",
             IconName::X => "icons/x.svg",
         }

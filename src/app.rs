@@ -21,6 +21,7 @@ actions!(
     colima_gpui,
     [
         About,
+        CheckForUpdates,
         Refresh,
         Quit,
         OpenSettings,
@@ -67,6 +68,17 @@ pub fn init(cx: &mut App) {
         ProfileStore::global(cx).update(cx, |store, cx| store.refresh(cx));
     });
     cx.on_action(about);
+    // An absent handler also disables the native menu item.
+    if crate::update::enabled() {
+        cx.on_action(|_: &CheckForUpdates, cx| {
+            if cx.windows().is_empty() {
+                let _ = open_main_window(cx);
+            }
+            crate::views::update_badge::show_updates(cx);
+            crate::views::update_badge::Updater::global(cx)
+                .update(cx, |updater, cx| updater.check(true, cx));
+        });
+    }
     cx.on_action(|_: &OpenSettings, cx| {
         ProfileStore::global(cx).update(cx, |store, cx| store.select_settings(cx));
     });
@@ -115,6 +127,8 @@ fn set_menus(cx: &mut App) {
     cx.set_menus([
         Menu::new(APP_NAME).items([
             MenuItem::action(format!("About {APP_NAME}"), About),
+            MenuItem::action("Check for Updates…", CheckForUpdates)
+                .disabled(!crate::update::enabled()),
             MenuItem::separator(),
             MenuItem::action("Settings…", OpenSettings),
             MenuItem::separator(),

@@ -1,5 +1,6 @@
 //! Images for one socket. The visible tab owns this view and its poller.
 
+use crate::ui::ErrorNote;
 use std::rc::Rc;
 
 use super::image_detail::{ImageDetail, ImageTab};
@@ -385,7 +386,12 @@ impl Render for ImagesView {
                         .when_some(
                             self.error.clone().or(self.list_error.clone()),
                             |el, error| {
-                                el.child(div().px_3().py_1().text_color(theme.error).child(error))
+                                el.child(
+                                    div()
+                                        .px_3()
+                                        .py_1()
+                                        .child(ErrorNote::new("images-row-error", error)),
+                                )
                             },
                         )
                         .child(detail.body(&theme, cx)),
@@ -513,7 +519,7 @@ impl Render for ImagesView {
             )
             .when_some(
                 self.error.clone().or(self.list_error.clone()),
-                |el, error| el.child(div().px_2().py_1().text_color(theme.error).child(error)),
+                |el, error| el.child(div().px_2().py_1().child(ErrorNote::new("images-error", error))),
             )
             .child(
                 div()
