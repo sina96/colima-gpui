@@ -36,7 +36,7 @@ fn published_release_is_one_the_updater_can_install() {
     ] {
         let asset = release
             .asset_for_platform(platform, arch)
-            .unwrap_or_else(|| panic!("no update for {arch}"));
+            .unwrap_or_else(|| panic!("no update for {platform} {arch}"));
         assert!(asset.size > 0, "{} is empty", asset.name);
         checksum(&sums, &asset.name).unwrap_or_else(|e| panic!("{}: {e}", asset.name));
     }

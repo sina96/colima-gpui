@@ -419,7 +419,10 @@ pub fn install(release: &Release) -> Result<(), String> {
         .parent()
         .ok_or("AppImage has no parent")?
         .join(".colima-update.XXXXXXXX");
-    let output = run("/usr/bin/mktemp", &["-d".as_ref(), template.as_os_str()])?;
+    // Staging needs write access next to the AppImage, like the macOS check of the app's folder.
+    let output = run("/usr/bin/mktemp", &["-d".as_ref(), template.as_os_str()]).map_err(|_| {
+        "The AppImage's folder is not writable. Download the update from View on GitHub.".to_owned()
+    })?;
     let temp = Temp(PathBuf::from(String::from_utf8_lossy(&output).trim()));
     let new = temp.0.join("update.AppImage");
     let sums_path = temp.0.join("SHA256SUMS");

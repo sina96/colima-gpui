@@ -8,11 +8,13 @@ body:
         Thank you for the report. Search the open issues first, so the same problem isn't reported twice.
         To report a security problem, don't use this form; read the security policy instead.
   - type: input
-    id: macos
+    id: os
     attributes:
-      label: macOS version
-      description: Apple menu > About This Mac.
-      placeholder: "15.1"
+      label: Operating system
+      description: |
+        macOS: the version (Apple menu > About This Mac).
+        Linux: the distribution and version, the desktop environment, and X11 or Wayland (`echo $XDG_SESSION_TYPE`).
+      placeholder: "macOS 15.1 — or — Ubuntu 24.04, GNOME 46, Wayland"
     validations:
       required: true
   - type: input

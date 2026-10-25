@@ -19,6 +19,7 @@ launch() {
 }
 abort_install() {
     launch --colima-update-failed "$1"
+    rm -rf -- "$tmp"
     exit 1
 }
 rollback() {
@@ -27,6 +28,7 @@ rollback() {
     wait "$child" 2>/dev/null || :
     mv -f -- "$old" "$app" || exit 1
     launch --colima-update-failed "$1"
+    rm -rf -- "$tmp"
     exit 1
 }
 [ ! -e "$old" ] && [ ! -L "$old" ] || abort_install 'An earlier backup exists.'
