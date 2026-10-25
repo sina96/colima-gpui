@@ -333,15 +333,7 @@ impl SettingsView {
                                     ),
                             ),
                     )
-                    .child(
-                        div()
-                            .id("release-notes")
-                            .max_h(px(200.))
-                            .overflow_y_scroll()
-                            .text_xs()
-                            .text_color(theme.text_muted)
-                            .child(release.body.unwrap_or_else(|| "No release notes.".into())),
-                    )
+                    // The notes stay on GitHub ("View on GitHub"), to keep this panel short.
                     .into_any_element(),
             );
         }
