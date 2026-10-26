@@ -1,7 +1,7 @@
 //! Create/edit profile form producing [`StartOptions`].
 //!
 //! Create mode exposes every option. Edit mode only offers what colima can change
-//! on an existing VM (CPUs, memory, growing the disk, Kubernetes, network address);
+//! on an existing VM (CPUs, memory, growing the disk, mounts, Kubernetes, network address);
 //! runtime, VM type, architecture and mount type are fixed after creation.
 
 use gpui::{
@@ -10,7 +10,7 @@ use gpui::{
 };
 
 use crate::colima::Instance;
-use crate::colima::model::StartOptions;
+use crate::colima::model::{Mount, StartOptions};
 use crate::theme::ActiveTheme;
 use crate::ui::button::ButtonSize;
 use crate::ui::select::{Select, SelectChanged};
@@ -53,6 +53,14 @@ pub enum ProfileFormEvent {
     },
 }
 
+struct MountRow {
+    id: usize,
+    path: Entity<TextInput>,
+    writable: bool,
+    mount_point: String,
+    _subscription: Subscription,
+}
+
 pub struct ProfileForm {
     mode: FormMode,
     /// Settings the form started from; edit mode compares against it.
@@ -66,6 +74,9 @@ pub struct ProfileForm {
     vm_type: Entity<Select<&'static str>>,
     arch: Entity<Select<&'static str>>,
     mount_type: Entity<Select<&'static str>>,
+    mounts: Vec<MountRow>,
+    no_mounts: bool,
+    next_mount_id: usize,
     kubernetes: bool,
     kubernetes_version: Entity<TextInput>,
     rosetta: bool,
@@ -171,6 +182,15 @@ impl ProfileForm {
             input
         });
 
+        let mounts: Vec<_> = initial
+            .mounts
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+            .map(|(id, mount)| mount_row(id, mount, cx))
+            .collect();
+        let next_mount_id = mounts.len();
         let subscriptions = vec![
             cx.subscribe(&name, |this, _, event: &TextInputEvent, cx| match event {
                 TextInputEvent::Changed => {
@@ -205,6 +225,9 @@ impl ProfileForm {
 
         Self {
             mode,
+            no_mounts: initial.mounts.is_none(),
+            mounts,
+            next_mount_id,
             kubernetes: initial.kubernetes,
             kubernetes_version,
             rosetta: initial.rosetta,
@@ -244,6 +267,16 @@ impl ProfileForm {
             kubernetes_version: self.kubernetes_version.read(cx).text().trim().to_owned(),
             rosetta: self.rosetta && value(&self.vm_type) == "vz",
             mount_type: value(&self.mount_type),
+            mounts: (!self.no_mounts).then(|| {
+                self.mounts
+                    .iter()
+                    .map(|row| Mount {
+                        location: row.path.read(cx).text().trim().to_owned(),
+                        writable: row.writable,
+                        mount_point: row.mount_point.clone(),
+                    })
+                    .collect()
+            }),
             network_address: self.network_address,
             activate: self.activate,
         }
@@ -291,6 +324,107 @@ impl ProfileForm {
             options: self.options(cx),
             stop_first,
         });
+    }
+
+    fn render_mounts(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.text_muted)
+                            .child("No mounts"),
+                    )
+                    .child(self.render_toggle(
+                        "no-mounts",
+                        self.no_mounts,
+                        |this| this.no_mounts = !this.no_mounts,
+                        cx,
+                    )),
+            )
+            .when(!self.no_mounts, |el| {
+                el.children(self.mounts.iter().map(|row| {
+                    let id = row.id;
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().flex_1().min_w_0().child(row.path.clone()))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(theme.text_muted)
+                                        .child("Writable"),
+                                )
+                                .child(
+                                    Switch::new(("mount-writable", id), row.writable).on_toggle(
+                                        cx.listener(move |this, _, _, cx| {
+                                            if let Some(row) =
+                                                this.mounts.iter_mut().find(|row| row.id == id)
+                                            {
+                                                row.writable = !row.writable;
+                                            }
+                                            cx.notify();
+                                        }),
+                                    ),
+                                ),
+                        )
+                        .child(
+                            Button::new(("mount-remove", id), "Remove").on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.mounts.retain(|row| row.id != id);
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                        .when(!row.mount_point.is_empty(), |el| {
+                            el.child(InfoTip::new(
+                                ("mount-point", id),
+                                format!("Guest path: {}", row.mount_point),
+                            ))
+                        })
+                }))
+                .child(
+                    div()
+                        .flex()
+                        .child(Button::new("mount-add", "Add folder").on_click(cx.listener(
+                            |this, _, window, cx| {
+                                let row = mount_row(
+                                    this.next_mount_id,
+                                    &Mount {
+                                        location: String::new(),
+                                        writable: true,
+                                        mount_point: String::new(),
+                                    },
+                                    cx,
+                                );
+                                this.next_mount_id += 1;
+                                window.focus(&row.path.focus_handle(cx), cx);
+                                this.mounts.push(row);
+                                cx.notify();
+                            },
+                        ))),
+                )
+                .when(self.mounts.is_empty(), |el| {
+                    el.child(div().text_sm().text_color(theme.text_muted).child(
+                        "Default: home folder, writable. Adding folders replaces the default.",
+                    ))
+                })
+            })
+            .into_any_element()
     }
 
     fn render_toggle(
@@ -360,6 +494,8 @@ impl Render for ProfileForm {
             rows.push(("Architecture", fixed(&options.arch)));
             rows.push(("Mount type", fixed(&options.mount_type)));
         }
+        // Mount folders remain in the main form in both create and edit modes.
+        rows.push(("Mount folders", self.render_mounts(cx)));
         rows.push((
             "Kubernetes",
             self.render_toggle(
@@ -449,6 +585,7 @@ impl Render for ProfileForm {
                             .flex()
                             .items_center()
                             .min_h(px(40.))
+                            .when(label == "Mount folders", |el| el.py_2())
                             .border_b_1()
                             .border_color(theme.border_variant)
                             .child(
@@ -459,7 +596,7 @@ impl Render for ProfileForm {
                                     .text_color(theme.text_muted)
                                     .child(label.to_owned()),
                             )
-                            .child(div().flex_1().max_w(px(320.)).child(control))
+                            .child(div().flex_1().min_w_0().max_w(px(if label == "Mount folders" { 520. } else { 320. })).child(control))
                     })))
                     .child(
                         div().flex().child(
@@ -508,6 +645,25 @@ impl Render for ProfileForm {
                         )
                     }),
             )
+    }
+}
+
+fn mount_row(id: usize, mount: &Mount, cx: &mut Context<ProfileForm>) -> MountRow {
+    let path = cx.new(|cx| {
+        let mut input = TextInput::new(cx).placeholder("/path/to/folder or ~/folder");
+        input.set_text(mount.location.clone(), cx);
+        input
+    });
+    let subscription = cx.subscribe(&path, |this, _, event: &TextInputEvent, cx| match event {
+        TextInputEvent::Changed => cx.notify(),
+        TextInputEvent::Submitted => this.submit(cx),
+    });
+    MountRow {
+        id,
+        path,
+        writable: mount.writable,
+        mount_point: mount.mount_point.clone(),
+        _subscription: subscription,
     }
 }
 
@@ -583,6 +739,17 @@ pub fn validate_options(options: &StartOptions, host_arch: &str) -> Result<(), S
     if options.vm_type == "krunkit" && host_arch != "aarch64" {
         return Err("krunkit needs an Apple silicon Mac.".into());
     }
+    if let Some(mounts) = &options.mounts {
+        for mount in mounts {
+            let path = &mount.location;
+            if !(path.starts_with('/') || path == "~" || path.starts_with("~/"))
+                || path.contains(':')
+                || path.chars().any(char::is_control)
+            {
+                return Err("Mount folders need an absolute path or ~/path, without colons or control characters.".into());
+            }
+        }
+    }
     match (options.mount_type.as_str(), options.vm_type.as_str()) {
         ("virtiofs", "qemu") => Err("virtiofs mounts need the vz or krunkit VM type.".into()),
         ("9p", "vz" | "krunkit") => Err("9p mounts need the qemu VM type.".into()),
@@ -605,6 +772,37 @@ mod tests {
         assert!(validate_name("../x", &existing).is_err());
         assert!(validate_name("-x", &existing).is_err());
         assert!(validate_name("default", &existing).is_err());
+    }
+
+    #[test]
+    fn mount_paths() {
+        let mut options = crate::colima::model::host_defaults("macos", "aarch64");
+        for path in ["~", "~/projects", "/tmp/read only", "/tmp/comma,quote\""] {
+            options.mounts = Some(vec![Mount {
+                location: path.into(),
+                writable: false,
+                mount_point: String::new(),
+            }]);
+            assert!(validate_options(&options, "aarch64").is_ok(), "{path}");
+        }
+        for path in [
+            "",
+            "none",
+            "relative/path",
+            "/tmp/path:w",
+            "/tmp/line\nfeed",
+        ] {
+            options.mounts = Some(vec![Mount {
+                location: path.into(),
+                writable: true,
+                mount_point: String::new(),
+            }]);
+            assert!(validate_options(&options, "aarch64").is_err(), "{path}");
+        }
+        options.mounts = None;
+        assert!(validate_options(&options, "aarch64").is_ok());
+        options.mounts = Some(Vec::new());
+        assert!(validate_options(&options, "aarch64").is_ok());
     }
 
     #[test]

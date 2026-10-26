@@ -85,7 +85,16 @@ pub fn gib(bytes: u64) -> String {
     format!("{} GiB", bytes / (1 << 30))
 }
 
-/// Editable scalar settings from Colima's generated configuration.
+/// A host folder mounted into the VM.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mount {
+    pub location: String,
+    pub writable: bool,
+    /// Preserve CLI-created mounts with a different guest path when editing.
+    pub mount_point: String,
+}
+
+/// Editable settings from Colima's generated configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartOptions {
     pub cpus: u32,
@@ -99,6 +108,8 @@ pub struct StartOptions {
     pub kubernetes_version: String,
     pub rosetta: bool,
     pub mount_type: String,
+    /// None disables mounts; Some(empty) uses Colima's writable home mount.
+    pub mounts: Option<Vec<Mount>>,
     pub network_address: bool,
     /// Switch the Docker/Kubernetes context to this profile on start. Not stored in
     /// `colima.yaml`; colima's own default is `true`.
@@ -130,6 +141,7 @@ pub fn host_defaults(os: &str, arch: &str) -> StartOptions {
         kubernetes_version: String::new(),
         rosetta: false,
         mount_type: if linux { "sshfs" } else { "virtiofs" }.into(),
+        mounts: Some(Vec::new()),
         network_address: false,
         activate: true,
     }
@@ -167,6 +179,28 @@ impl StartOptions {
             "--kubernetes-version".into(),
             self.kubernetes_version.clone(),
         ]);
+        // An explicit empty flag resets a saved list to Colima's default.
+        match &self.mounts {
+            None => args.extend(["--mount".into(), "none".into()]),
+            Some(mounts) if mounts.is_empty() => args.extend(["--mount".into(), String::new()]),
+            Some(mounts) => {
+                for mount in mounts {
+                    let mut value = mount.location.clone();
+                    if !mount.mount_point.is_empty() {
+                        value.push(':');
+                        value.push_str(&mount.mount_point);
+                    }
+                    if mount.writable {
+                        value.push_str(":w");
+                    }
+                    // Cobra's StringSlice flag parses CSV, even with repeated flags.
+                    if value.contains([',', '"']) {
+                        value = format!("\"{}\"", value.replace('"', "\"\""));
+                    }
+                    args.extend(["--mount".into(), value]);
+                }
+            }
+        }
         args
     }
 
@@ -192,11 +226,14 @@ impl StartOptions {
         Self::parse_config(&text)
     }
 
-    /// Reads the scalar subset emitted by Colima, without adding a YAML dependency.
-    /// Unknown sections (mounts, provision, env, etc.) are ignored; unsupported
+    /// Reads the editable subset emitted by Colima, without adding a YAML dependency.
+    /// Unknown sections (provision, env, etc.) are ignored; unsupported
     /// syntax in an editable field returns an error instead of silently changing it.
     pub fn parse_config(text: &str) -> Result<Self, super::CliError> {
-        let mut options = Self::default();
+        let mut options = Self {
+            mounts: parse_mounts(text)?,
+            ..Self::default()
+        };
         let mut section = "";
         for line in text.lines() {
             let trimmed = line.trim();
@@ -259,6 +296,94 @@ impl StartOptions {
         }
         Ok(options)
     }
+}
+
+/// Colima emits a block list, [] for defaults, and null for disabled mounts.
+fn parse_mounts(text: &str) -> Result<Option<Vec<Mount>>, super::CliError> {
+    let error = || super::CliError::Parse("unsupported mounts configuration".into());
+    let mut mounts = Vec::<Mount>::new();
+    let mut in_mounts = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if !line.starts_with(char::is_whitespace) && !trimmed.starts_with('-') {
+            if let Some(raw) = trimmed.strip_prefix("mounts:") {
+                let value = raw.split(" #").next().unwrap_or(raw).trim();
+                match value {
+                    "[]" => return Ok(Some(Vec::new())),
+                    "null" | "~" => return Ok(None),
+                    "" => in_mounts = true,
+                    _ => return Err(error()),
+                }
+                continue;
+            }
+            if in_mounts {
+                break;
+            }
+        }
+        if !in_mounts {
+            continue;
+        }
+        let field = if let Some(field) = trimmed.strip_prefix("- ") {
+            mounts.push(Mount {
+                location: String::new(),
+                writable: false,
+                mount_point: String::new(),
+            });
+            field
+        } else {
+            trimmed
+        };
+        let mount = mounts.last_mut().ok_or_else(error)?;
+        let (key, raw) = field.split_once(':').ok_or_else(error)?;
+        let value = mount_scalar(raw)?;
+        match key.trim() {
+            "location" => mount.location = value,
+            "writable" => mount.writable = value.parse().map_err(|_| error())?,
+            "mountPoint" => mount.mount_point = value,
+            _ => return Err(error()),
+        }
+    }
+    if mounts.iter().any(|mount| mount.location.is_empty()) {
+        return Err(error());
+    }
+    if in_mounts && mounts.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(mounts))
+    }
+}
+
+fn mount_scalar(raw: &str) -> Result<String, super::CliError> {
+    let raw = raw.trim();
+    let error = || super::CliError::Parse("unsupported mount value".into());
+    if raw.starts_with('"') || raw.starts_with('\'') {
+        let quote = raw.chars().next().unwrap();
+        // Find a closing quote followed only by whitespace or a YAML comment.
+        for (index, ch) in raw.char_indices().skip(1) {
+            if ch != quote {
+                continue;
+            }
+            let rest = raw[index + 1..].trim();
+            if !rest.is_empty() && !rest.starts_with('#') {
+                continue;
+            }
+            let quoted = &raw[..=index];
+            return if quote == '"' {
+                serde_json::from_str(quoted).map_err(|_| error())
+            } else {
+                Ok(raw[1..index].replace("''", "'"))
+            };
+        }
+        return Err(error());
+    }
+    let value = raw.split(" #").next().unwrap_or(raw).trim();
+    if value.is_empty() || value.starts_with(['[', '{', '&', '*', '!', '|', '>']) {
+        return Err(error());
+    }
+    Ok(value.to_owned())
 }
 
 #[cfg(test)]
@@ -345,7 +470,7 @@ mod tests {
         if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             expected.push("--vz-rosetta=false");
         }
-        expected.extend(["--kubernetes-version", ""]);
+        expected.extend(["--kubernetes-version", "", "--mount", "~"]);
         assert_eq!(options.to_args(), expected);
         assert!(
             StartOptions::default()
@@ -411,6 +536,87 @@ mod tests {
             StartOptions::parse_config("version: ignored\nnetwork:\n  version: ignored").unwrap();
         assert!(options.kubernetes_version.is_empty());
     }
+    #[test]
+    fn mounts_config_and_flag_round_trip() {
+        // Extend the captured generated config with Colima's block-list shape.
+        let fixture = include_str!("../../tests/fixtures/colima_config.yaml");
+        let config = fixture.replace(
+            "  - location: ~",
+            r#"  - location: ~/projects
+    writable: true
+  - location: '/tmp/read only # folder'
+    writable: false
+  - location: "/tmp/comma, and \"quote\""
+    mountPoint: /mnt/files
+    writable: true"#,
+        );
+        let options = StartOptions::parse_config(&config).unwrap();
+        let mounts = options.mounts.as_ref().unwrap();
+        assert_eq!(mounts.len(), 3);
+        assert_eq!(mounts[0].location, "~/projects");
+        assert!(mounts[0].writable);
+        assert_eq!(mounts[1].location, "/tmp/read only # folder");
+        assert!(!mounts[1].writable);
+        let args = options.to_args();
+        let flags: Vec<_> = args
+            .windows(2)
+            .filter(|pair| pair[0] == "--mount")
+            .map(|pair| pair[1].as_str())
+            .collect();
+        assert_eq!(
+            flags,
+            [
+                "~/projects:w",
+                "/tmp/read only # folder",
+                "\"/tmp/comma, and \"\"quote\"\":/mnt/files:w\""
+            ]
+        );
+        assert_eq!(
+            StartOptions::parse_config(
+                "mounts:\n- location: '/tmp/it''s here'\n  writable: true\ncpu: 4"
+            )
+            .unwrap()
+            .mounts
+            .unwrap()[0]
+                .location,
+            "/tmp/it's here"
+        );
+    }
+
+    #[test]
+    fn mounts_defaults_disabled_and_invalid_config() {
+        for config in ["", "mounts: []", "mounts: [] # defaults"] {
+            let options = StartOptions::parse_config(config).unwrap();
+            assert_eq!(options.mounts, Some(Vec::new()));
+            assert!(
+                options
+                    .to_args()
+                    .windows(2)
+                    .any(|pair| pair == ["--mount", ""])
+            );
+        }
+        for config in ["mounts: null", "mounts: ~", "mounts:\ncpu: 2"] {
+            let options = StartOptions::parse_config(config).unwrap();
+            assert_eq!(options.mounts, None);
+            assert!(
+                options
+                    .to_args()
+                    .windows(2)
+                    .any(|pair| pair == ["--mount", "none"])
+            );
+        }
+        for config in [
+            "mounts: [{location: /tmp}]",
+            "mounts:\n  - writable: true",
+            "mounts:\n  - location: /tmp\n    writable: yes",
+            "mounts:\n  - location: [one, two]",
+            "mounts:\n  - location: \"unterminated",
+            "mounts:\n  - location: /tmp\n    unknown: value",
+        ] {
+            assert!(StartOptions::parse_config(config).is_err(), "{config}");
+        }
+    }
+
     #[test]
     fn existing_fixtures() {
         assert_eq!(
