@@ -1261,7 +1261,7 @@ impl Render for ProfileDetail {
             (LoadState::Ready, _, None) => empty_state(
                 &theme,
                 "No profiles yet",
-                "Create one to run containers on this Mac.",
+                "Create one to run containers on this computer.",
                 Some(
                     Button::new("create-first", "New profile")
                         .style(ButtonStyle::Primary)

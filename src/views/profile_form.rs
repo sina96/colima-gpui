@@ -280,20 +280,11 @@ impl ProfileForm {
         toggle: fn(&mut Self),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .id(id)
-            .child(
-                Switch::new("switch", on).on_toggle(cx.listener(move |this, _, _, cx| {
-                    toggle(this);
-                    cx.notify();
-                })),
-            )
-            .on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _, cx| {
-                if event.keystroke.key == "space" {
-                    toggle(this);
-                    cx.stop_propagation();
-                    cx.notify();
-                }
+        // GPUI turns Space and Enter on the focused switch into a click, so no key handler here.
+        Switch::new(id, on)
+            .on_toggle(cx.listener(move |this, _, _, cx| {
+                toggle(this);
+                cx.notify();
             }))
             .into_any_element()
     }

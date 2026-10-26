@@ -74,6 +74,8 @@ impl Render for Stepper {
             .flex()
             .items_center()
             .gap_1()
+            // Same width as `Select`, so form controls line up.
+            .w(px(180.))
             .h(px(28.))
             .rounded_sm()
             .border_1()
@@ -100,6 +102,7 @@ impl Render for Stepper {
             )
             .child(
                 div()
+                    .flex_1()
                     .min_w(px(60.))
                     .text_center()
                     .font_family(MONO_FONT)
