@@ -3,8 +3,8 @@
 //! Create mode exposes every option. Edit mode only offers what colima can change
 //! on an existing VM (CPUs, memory, growing the disk, mounts, Kubernetes, network address);
 //! runtime, VM type, architecture and mount type are fixed after creation.
-//! Hostname, root disk and CPU type are also kept read-only in Edit until their
-//! effective changes on an existing VM have been verified.
+//! DNS servers are fixed too (checked on colima 0.10.3: a restart doesn't apply them).
+//! Root disk and CPU type stay read-only in Edit until a restart is checked for them.
 
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString,
@@ -416,11 +416,8 @@ impl ProfileForm {
             },
             network_interface: self.network_interface.read(cx).text().trim().to_owned(),
             mount_inotify: self.mount_inotify,
-            hostname: if matches!(self.mode, FormMode::Create { .. }) {
-                self.hostname.read(cx).text().trim().to_owned()
-            } else {
-                self.initial.hostname.clone()
-            },
+            // Applied on restart (checked on colima 0.10.3).
+            hostname: self.hostname.read(cx).text().trim().to_owned(),
             env: self
                 .env
                 .iter()
@@ -911,7 +908,7 @@ impl Render for ProfileForm {
                                 .child(advanced_row("Inotify events", self.render_toggle("mount-inotify", self.mount_inotify,
                                     |this| this.mount_inotify = !this.mount_inotify, cx), cx))
                                 .child(advanced_heading("Network", cx))
-                                .child(advanced_row("Hostname", if creating { self.hostname.clone().into_any_element() } else { fixed(if options.hostname.is_empty() { "Colima default" } else { &options.hostname }) }, cx))
+                                .child(advanced_row("Hostname", self.hostname.clone().into_any_element(), cx))
                                 .child(advanced_row("Port forwarder", self.port_forwarder.clone().into_any_element(), cx))
                                 .child(advanced_row("DNS servers", if creating { self.dns.clone().into_any_element() } else if options.dns.is_empty() { fixed("Colima default") } else { fixed(&options.dns.join(", ")) }, cx))
                                 .when(cfg!(target_os = "macos"), |el| {
@@ -941,7 +938,7 @@ impl Render for ProfileForm {
                                 .when(options.vm_type == "vz" && self.nested_supported, |el| el.child(advanced_row("Nested virtualization", self.render_toggle("nested-virtualization", self.nested_virtualization,
                                     |this| this.nested_virtualization = !this.nested_virtualization, cx), cx)))
                                 .when(!creating, |el| el.child(div().text_sm().text_color(theme.text_muted)
-                                    .child("Hostname, root disk and CPU type can be set in the create form.")))
+                                    .child("Root disk and CPU type can be set in the create form.")))
                                 .when(!creating, |el| el.child(div().flex().flex_col().gap_1()
                                     .child(div().flex().child(Button::new("open-colima-yaml", "Open colima.yaml")
                                         .on_click(cx.listener(|this, _, _, cx| this.open_config(cx)))))
