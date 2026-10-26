@@ -63,6 +63,56 @@ pub fn stop(profile: &str) -> Result<(), CliError> {
     stop_with_force(profile, false)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KubernetesOp {
+    Start,
+    Stop,
+    Reset,
+}
+
+impl KubernetesOp {
+    fn subcommand(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Reset => "reset",
+        }
+    }
+
+    pub fn progress_label(self) -> &'static str {
+        match self {
+            Self::Start => "Starting Kubernetes…",
+            Self::Stop => "Stopping Kubernetes…",
+            Self::Reset => "Resetting Kubernetes…",
+        }
+    }
+}
+
+/// Changes only Kubernetes, leaving the running VM alone. Colima 0.10.3's reset
+/// runs without a prompt and has no force/yes flag; the UI confirms it first.
+pub fn kubernetes(profile: &str, op: KubernetesOp) -> Result<(), CliError> {
+    stopped_already(
+        op,
+        cli::run(COLIMA, &["kubernetes", op.subcommand(), "-p", profile]),
+    )
+}
+
+/// Colima refuses to stop k3s that isn't running ("kubernetes is not enabled"),
+/// which also happens between restarts when k3s keeps crashing. Stop wanted it off.
+fn stopped_already(
+    op: KubernetesOp,
+    result: Result<std::process::Output, CliError>,
+) -> Result<(), CliError> {
+    match result {
+        Err(CliError::Failed { stderr, .. })
+            if op == KubernetesOp::Stop && stderr.contains("is not enabled") =>
+        {
+            Ok(())
+        }
+        result => result.map(drop),
+    }
+}
+
 pub fn parse_list(stdout: &str) -> Result<Vec<Instance>, CliError> {
     stdout
         .lines()
@@ -216,6 +266,18 @@ fn stream_command(mut command: std::process::Command) -> std::sync::mpsc::Receiv
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopping_stopped_kubernetes_succeeds() {
+        let not_enabled = || {
+            Err(CliError::Failed {
+                program: "colima".into(),
+                stderr: "level=fatal msg=\"kubernetes is not enabled\"".into(),
+            })
+        };
+        assert!(stopped_already(KubernetesOp::Stop, not_enabled()).is_ok());
+        assert!(stopped_already(KubernetesOp::Reset, not_enabled()).is_err());
+    }
     #[test]
     fn streams_both_pipes_before_exit() {
         let mut command = std::process::Command::new("/bin/sh");

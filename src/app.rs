@@ -70,7 +70,13 @@ const SIDEBAR_WIDTH: f32 = 220.;
 pub fn init(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &Refresh, cx| {
-        ProfileStore::global(cx).update(cx, |store, cx| store.refresh(cx));
+        ProfileStore::global(cx).update(cx, |store, cx| {
+            store.refresh(cx);
+            // A manual refresh also picks up Kubernetes changes made in a terminal.
+            if let Some(profile) = store.selected_instance().map(|i| i.name.clone()) {
+                store.refresh_status(&profile, cx);
+            }
+        });
     });
     cx.on_action(about);
     // An absent handler also disables the native menu item.

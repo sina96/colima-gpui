@@ -6,6 +6,43 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-26
+
+More of Colima's options in the profile form, Kubernetes controls, and fixes found while testing on Linux.
+
+### Added
+
+- **Profile options:**
+  - Rosetta for x86_64 containers, on Apple silicon with the `vz` VM type.
+  - Shared folders: your home folder (Colima's default), your own list of folders, each read-only or writable, or none.
+  - **Resources:** root disk size.
+  - **VM:** SSH agent forwarding, CPU type (QEMU) and nested virtualization (`vz`, on Macs that support it).
+  - **Mounts:** inotify events for mounted folders.
+  - **Network:** hostname, port forwarder, DNS servers, and on macOS the network mode (shared or bridged) and host interface.
+  - **Kubernetes:** the version and k3s arguments.
+  - **Environment:** environment variables for the VM.
+  - **Open colima.yaml** in the edit form opens the profile's file in your text editor, for settings the form doesn't cover (registry mirrors, insecure registries, provision scripts).
+- **Kubernetes:** start, stop and reset Kubernetes on a running profile without restarting it. The tooltips say how each changes kubectl's current context. Refresh (⌘R) picks up Kubernetes started or stopped from a terminal.
+- **Cleanup:** the size of Colima's download cache, shared by all profiles, and an action to prune it (`colima prune --force`).
+
+### Changed
+
+- The profile form is redesigned in Zed's settings style: one centred column of sections, each row with a short description, rarely used options behind **More options** under each section, and switches instead of tick boxes. A problem that blocks saving shows next to the buttons, so it stays visible while you scroll.
+- With Kubernetes on and less than 2 GiB of memory, the form warns that k3s will keep restarting.
+- Settings that Colima fixes once a profile exists (DNS servers, network mode, root disk, CPU type) are shown read-only in the edit form.
+- The Docker socket path is shown with `~` for your home folder; copying it still copies the full path.
+- Cleanup says "this computer" instead of "macOS", so it reads right on Linux too.
+- The `−` and `+` buttons on the CPU, memory and disk fields sit closer together.
+
+### Fixed
+
+- Colima GPUI follows Colima's own rules for where profiles live: `COLIMA_HOME`, `~/.colima`, then `XDG_CONFIG_HOME`, and `LIMA_HOME` for the VM disks.
+- **Linux:** new profiles default to the `qemu` VM type and `sshfs` mounts, and the form offers only what Linux supports.
+- Profiles created from the command line with names like `Dev` or `my_vm` can be edited.
+- "Unused volumes" in Cleanup can be pruned when the unused volumes are empty (0 B).
+- Clicking a dropdown while it's open closes it.
+- The Back button on container, image and volume pages no longer disappears when the status or name is long, for example after stopping a container.
+
 ## [0.2.0] - 2026-10-26
 
 Colima GPUI now runs on Linux too.
@@ -77,7 +114,8 @@ The first public version: a native macOS app for Colima, for Apple silicon and I
   - Settings → Help links to the documentation for Colima, Lima, Docker, Docker Compose, containerd, Kubernetes, k3s and kubectl.
 - **Downloads:** a `.dmg` and a `.zip` for Apple silicon and for Intel Macs, with SHA-256 checksums.
 
-[Unreleased]: https://github.com/sina96/colima-gpui/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sina96/colima-gpui/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/sina96/colima-gpui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sina96/colima-gpui/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/sina96/colima-gpui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sina96/colima-gpui/releases/tag/v0.1.0

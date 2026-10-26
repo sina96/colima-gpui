@@ -5,6 +5,7 @@ use gpui::{
     Subscription, Task, Window, container_query, div, prelude::*, px,
 };
 
+use crate::colima::commands::{self, KubernetesOp};
 use crate::colima::{Instance, model::gib};
 use crate::store::{LoadState, Op, ProfileStore, Selection};
 use crate::theme::{ActiveTheme, MONO_FONT, Theme};
@@ -150,6 +151,9 @@ pub struct ProfileDetail {
     store: Entity<ProfileStore>,
     /// Open delete confirmation and the profile it targets.
     confirm: Option<(Entity<ConfirmDialog>, String, Subscription)>,
+    kubernetes_confirm: Option<(Entity<ConfirmDialog>, Subscription)>,
+    kubernetes_busy: std::collections::HashMap<String, KubernetesOp>,
+    kubernetes_errors: std::collections::HashMap<String, String>,
     /// Form for `Selection::NewProfile` / `EditProfile`, rebuilt when the selection changes.
     form: Option<(Selection, Entity<ProfileForm>, Subscription)>,
     tab: ProfileTab,
@@ -181,6 +185,9 @@ impl ProfileDetail {
         Self {
             store,
             confirm: None,
+            kubernetes_confirm: None,
+            kubernetes_busy: Default::default(),
+            kubernetes_errors: Default::default(),
             form: None,
             tab: ProfileTab::Overview,
             tab_profile: None,
@@ -350,8 +357,73 @@ impl ProfileDetail {
     }
 
     fn run(&mut self, op: Op, profile: String, cx: &mut Context<Self>) {
+        if self.kubernetes_busy.contains_key(&profile) {
+            return;
+        }
         self.store
             .update(cx, |store, cx| store.run(op, profile, cx));
+    }
+
+    fn run_kubernetes(&mut self, profile: String, op: KubernetesOp, cx: &mut Context<Self>) {
+        let store = self.store.read(cx);
+        if self.kubernetes_busy.contains_key(&profile)
+            || store.busy(&profile).is_some()
+            || !store
+                .instances()
+                .iter()
+                .any(|i| i.name == profile && i.is_running())
+        {
+            return;
+        }
+        self.kubernetes_busy.insert(profile.clone(), op);
+        self.kubernetes_errors.remove(&profile);
+        let name = profile.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { commands::kubernetes(&name, op) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.kubernetes_busy.remove(&profile);
+                if let Err(error) = result {
+                    this.kubernetes_errors
+                        .insert(profile.clone(), crate::colima::cli::describe(&error));
+                }
+                this.store.update(cx, |store, cx| {
+                    store.refresh_status(&profile, cx);
+                    store.refresh(cx);
+                });
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn confirm_kubernetes_reset(
+        &mut self,
+        profile: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dialog = cx.new(|cx| {
+            ConfirmDialog::new(
+                format!("Reset Kubernetes on “{profile}”?"),
+                "This deletes all Kubernetes objects and cluster data, then starts a fresh cluster. The VM stays running.",
+                cx,
+            ).confirm_label("Reset Kubernetes")
+        });
+        let subscription = cx.subscribe(&dialog, move |this, _, result, cx| {
+            this.kubernetes_confirm = None;
+            if *result == DialogResult::Confirmed {
+                this.run_kubernetes(profile.clone(), KubernetesOp::Reset, cx);
+            }
+            cx.notify();
+        });
+        dialog.update(cx, |dialog, cx| dialog.show(window, cx));
+        self.kubernetes_confirm = Some((dialog, subscription));
+        cx.notify();
     }
 
     fn confirm_delete(&mut self, profile: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -461,8 +533,10 @@ impl ProfileDetail {
         let busy = store.busy(&inst.name);
         let error = store.error(&inst.name).cloned();
         let status = store.status(&inst.name).cloned();
+        let status_error = store.status_error(&inst.name).cloned();
         let running = inst.is_running();
-        let any_busy = busy.is_some();
+        let kubernetes_busy = self.kubernetes_busy.get(&inst.name).copied();
+        let any_busy = busy.is_some() || kubernetes_busy.is_some();
         let name = inst.name.clone();
         let docker_ok = running && inst.is_docker();
         let socket = status
@@ -643,9 +717,26 @@ impl ProfileDetail {
             docker_body.child(div().text_color(theme.text_muted).child("Not using Docker"))
         };
         let docker = overview_card(&theme, "Docker", IconName::Layers, docker_body);
-        let kubernetes = status
-            .as_ref()
-            .map(|s| if s.kubernetes { "On" } else { "Off" });
+        // `colima list` reports saved configuration, not the live k3s service.
+        let kubernetes_on = status.as_ref().is_some_and(|s| s.kubernetes);
+        let kubernetes_known = status.is_some();
+        let kubernetes = if running {
+            match (&status, &status_error) {
+                (Some(status), _) => {
+                    if status.kubernetes {
+                        "On"
+                    } else {
+                        "Off"
+                    }
+                }
+                (None, Some(_)) => "Unavailable",
+                (None, None) => "Loading…",
+            }
+        } else {
+            missing_status
+        };
+        let kubernetes_name = name.clone();
+        let reset_name = name.clone();
         let mut network = Some(overview_card(
             &theme,
             "Network + Kubernetes",
@@ -664,9 +755,87 @@ impl ProfileDetail {
                 .child(overview_value(
                     &theme,
                     "Kubernetes",
-                    kubernetes.unwrap_or(missing_status).into(),
+                    kubernetes.into(),
                     false,
-                )),
+                ))
+                .when(running, |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_1()
+                            .pt_1()
+                            .child(
+                                Button::new(
+                                    "kubernetes-toggle",
+                                    if kubernetes_on {
+                                        "Stop Kubernetes"
+                                    } else {
+                                        "Start Kubernetes"
+                                    },
+                                )
+                                // Colima switches kubectl on start and leaves it on stop.
+                                .tooltip(if kubernetes_on {
+                                    "Stop k3s. kubectl keeps this cluster as its current context."
+                                } else {
+                                    "Start k3s and make it kubectl's current context."
+                                })
+                                .disabled(any_busy || !kubernetes_known)
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        this.run_kubernetes(
+                                            kubernetes_name.clone(),
+                                            if kubernetes_on {
+                                                KubernetesOp::Stop
+                                            } else {
+                                                KubernetesOp::Start
+                                            },
+                                            cx,
+                                        );
+                                    },
+                                )),
+                            )
+                            .child(
+                                Button::new("kubernetes-reset", "Reset…")
+                                    .tooltip("Delete the cluster and start a fresh one. Also makes it kubectl's current context.")
+                                    .disabled(any_busy || !kubernetes_known)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.confirm_kubernetes_reset(
+                                            reset_name.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                    )
+                })
+                .when_some(kubernetes_busy, |el, op| {
+                    el.child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.text_muted)
+                            .child(op.progress_label()),
+                    )
+                })
+                .when_some(self.kubernetes_errors.get(&name).cloned(), |el, error| {
+                    el.child(
+                        ErrorNote::new("kubernetes-error", "Kubernetes action failed")
+                            .details(error),
+                    )
+                })
+                .when_some(
+                    status_error.filter(|_| running && status.is_none()),
+                    |el, error| {
+                        el.child(
+                            ErrorNote::new(
+                                "kubernetes-status-error",
+                                "Kubernetes status unavailable",
+                            )
+                            .details(error),
+                        )
+                    },
+                ),
         ));
         let usage = self.usage.as_ref().map(|(_, usage)| usage.clone());
         let disk_full = usage
@@ -1049,7 +1218,7 @@ impl Render for ProfileDetail {
             (LoadState::Ready, _, None) => empty_state(
                 &theme,
                 "No profiles yet",
-                "Create one to run containers on this Mac.",
+                "Create one to run containers on this computer.",
                 Some(
                     Button::new("create-first", "New profile")
                         .style(ButtonStyle::Primary)
@@ -1068,6 +1237,9 @@ impl Render for ProfileDetail {
             .bg(theme.editor_background)
             .child(content)
             .when_some(self.confirm.as_ref(), |el, (dialog, _, _)| {
+                el.child(dialog.clone())
+            })
+            .when_some(self.kubernetes_confirm.as_ref(), |el, (dialog, _)| {
                 el.child(dialog.clone())
             })
     }

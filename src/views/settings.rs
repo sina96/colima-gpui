@@ -381,7 +381,7 @@ impl SettingsView {
                 setting_label(
                     "auto-trim-info",
                     "Return free space after cleanup",
-                    "Run fstrim after every prune to return unused VM disk blocks to macOS. Nothing else is deleted.",
+                    "Run fstrim after every prune to return unused VM disk blocks to this computer. Nothing else is deleted.",
                 ),
                 Switch::new("auto-trim", settings.trim_after_prune).on_toggle(cx.listener(
                     |_, on: &bool, _, cx| {
