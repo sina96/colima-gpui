@@ -823,6 +823,12 @@ impl ProfileDetail {
                                         "Start Kubernetes"
                                     },
                                 )
+                                // Colima switches kubectl on start and leaves it on stop.
+                                .tooltip(if kubernetes_on {
+                                    "Stop k3s. kubectl keeps this cluster as its current context."
+                                } else {
+                                    "Start k3s and make it kubectl's current context."
+                                })
                                 .disabled(any_busy || !kubernetes_known)
                                 .on_click(cx.listener(
                                     move |this, _, _, cx| {
@@ -840,6 +846,7 @@ impl ProfileDetail {
                             )
                             .child(
                                 Button::new("kubernetes-reset", "Reset…")
+                                    .tooltip("Delete the cluster and start a fresh one. Also makes it kubectl's current context.")
                                     .disabled(any_busy || !kubernetes_known)
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.confirm_kubernetes_reset(
