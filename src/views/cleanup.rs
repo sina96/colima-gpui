@@ -6,7 +6,7 @@ use gpui::{
 };
 
 use crate::{
-    colima::commands,
+    colima::{cache, cli, commands},
     docker::system::{self, Prune, Usage, VmDisk, format_size},
     theme::{ActiveTheme, CHART_BUILD_CACHE, CHART_CONTAINERS, CHART_IMAGES, CHART_VOLUMES},
     ui::{
@@ -19,6 +19,7 @@ use crate::{
 enum Action {
     Prune(Prune),
     Trim,
+    ColimaCache,
 }
 
 pub struct CleanupView {
@@ -26,6 +27,10 @@ pub struct CleanupView {
     profile: Option<String>,
     usage: Vec<Usage>,
     disk: Option<VmDisk>,
+    unused_volumes: Option<usize>,
+    volumes_error: Option<SharedString>,
+    cache_size: Option<u64>,
+    cache_error: Option<SharedString>,
     loaded: bool,
     refreshing: bool,
     refresh_again: bool,
@@ -56,6 +61,10 @@ impl CleanupView {
             socket,
             usage: Vec::new(),
             disk: None,
+            unused_volumes: None,
+            volumes_error: None,
+            cache_size: None,
+            cache_error: None,
             loaded: false,
             refreshing: false,
             refresh_again: false,
@@ -83,10 +92,12 @@ impl CleanupView {
         let task = cx.background_executor().spawn(async move {
             let usage = system::disk_usage(&socket);
             let disk = profile.map(|profile| commands::vm_disk(&profile));
-            (usage, disk)
+            let volumes = unused_volumes(&socket);
+            let cache = cache::size();
+            (usage, disk, volumes, cache)
         });
         cx.spawn(async move |this, cx| {
-            let (usage, disk) = task.await;
+            let (usage, disk, volumes, cache) = task.await;
             this.update(cx, |this, cx| {
                 this.refreshing = false;
                 this.loaded = true;
@@ -97,6 +108,26 @@ impl CleanupView {
                     }
                     Err(error) => this.list_error = Some(error.to_string().into()),
                 }
+                this.unused_volumes = match volumes {
+                    Ok(count) => {
+                        this.volumes_error = None;
+                        Some(count)
+                    }
+                    Err(error) => {
+                        this.volumes_error = Some(error.to_string().into());
+                        None
+                    }
+                };
+                this.cache_size = match cache {
+                    Ok(size) => {
+                        this.cache_error = None;
+                        Some(size)
+                    }
+                    Err(error) => {
+                        this.cache_error = Some(error.to_string().into());
+                        None
+                    }
+                };
                 match disk {
                     Some(Ok(disk)) => {
                         this.disk = Some(disk);
@@ -132,17 +163,30 @@ impl CleanupView {
                     prune.description(),
                     format_size(prune.estimate(&self.usage)),
                     if crate::settings::get(cx).trim_after_prune {
-                        "After pruning, fstrim will return unused disk blocks to macOS."
+                        "After pruning, fstrim will return unused disk blocks to this computer."
                     } else {
-                        "Automatic return of free space to macOS is disabled in Settings."
+                        "Automatic return of free space to this computer is disabled in Settings."
                     }
                 ),
                 (prune == Prune::Everything).then_some(profile),
             ),
-            Action::Trim => (
-                "Return free space to macOS".into(),
+            Action::ColimaCache => (
+                "Prune Colima download cache".into(),
                 format!(
-                    "Profile: {profile}. Can return approximately {}. Nothing is deleted: fstrim releases unused VM filesystem blocks from the Mac disk file. Actual returned space depends on the host filesystem.",
+                    "Removes cached downloads shared by all Colima profiles on this computer ({}). Profiles and VM data are kept. Future starts may download these assets again. Estimated size: {}.",
+                    cache::cache_home()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "path unavailable".into()),
+                    self.cache_size
+                        .map(format_size)
+                        .unwrap_or_else(|| "unavailable".into())
+                ),
+                None,
+            ),
+            Action::Trim => (
+                "Return free space".into(),
+                format!(
+                    "Profile: {profile}. Can return approximately {}. Nothing is deleted: fstrim releases unused VM filesystem blocks from the host disk file. Actual returned space depends on the host filesystem.",
                     self.disk
                         .as_ref()
                         .and_then(VmDisk::returnable)
@@ -195,6 +239,8 @@ impl CleanupView {
                         freed
                     })
                 }
+                Action::ColimaCache => cache::prune()
+                    .map(|bytes| format!("Freed {} in Colima download cache", format_size(bytes))),
                 Action::Trim => {
                     let before = profile
                         .as_deref()
@@ -222,6 +268,36 @@ impl CleanupView {
     }
 }
 
+// Docker's summary only exposes total volume count. Query unused volumes separately,
+// so empty unused volumes remain actionable without enabling pruning of in-use ones.
+fn unused_volumes(socket: &str) -> Result<usize, cli::CliError> {
+    let output = cli::run(
+        "docker",
+        &[
+            "--host",
+            socket,
+            "volume",
+            "ls",
+            "--filter",
+            "dangling=true",
+            "--format",
+            "json",
+        ],
+    )?;
+    serde_json::Deserializer::from_slice(&output.stdout)
+        .into_iter::<serde_json::Value>()
+        .try_fold(0, |count, volume| volume.map(|_| count + 1))
+        .map_err(|error| cli::CliError::Parse(error.to_string()))
+}
+
+fn prune_available(prune: Prune, usage: &[Usage], unused_volumes: Option<usize>) -> bool {
+    if prune == Prune::Volumes {
+        unused_volumes.is_some_and(|count| count > 0)
+    } else {
+        prune.estimate(usage) > 0
+    }
+}
+
 // Blocking helper, called only on the background executor. Keep successful prune
 // output visible even if trim or the subsequent host measurement fails.
 fn return_space(profile: Option<&str>, before: Option<u64>) -> String {
@@ -229,16 +305,16 @@ fn return_space(profile: Option<&str>, before: Option<u64>) -> String {
         return "Could not return space: unknown Colima profile.".into();
     };
     if let Err(error) = commands::trim(profile) {
-        return format!("Could not return space to macOS: {error}");
+        return format!("Could not return space to this computer: {error}");
     }
     match commands::vm_disk(profile) {
         Ok(after) => match (before, after.allocated) {
             (Some(before), Some(after)) => format!(
-                "Returned {} to macOS",
+                "Returned {} to this computer",
                 format_size(before.saturating_sub(after))
             ),
             _ => {
-                "Trim complete; returned space unavailable (Mac allocation could not be measured)."
+                "Trim complete; returned space unavailable (host allocation could not be measured)."
                     .into()
             }
         },
@@ -289,15 +365,20 @@ impl CleanupView {
                 (
                     format!("~{}", format_size(estimate)),
                     prune.description().to_owned(),
-                    estimate > 0
+                    prune_available(prune, &self.usage, self.unused_volumes)
                         && self.list_error.is_none()
                         && (prune != Prune::Everything || self.profile.is_some()),
                 )
             }
+            Action::ColimaCache => (
+                self.cache_size.map(format_size).unwrap_or_else(|| "Size unavailable".into()),
+                "Cached downloads shared by all Colima profiles on this computer. Pruning keeps profiles and VM data; future starts may download these assets again.".into(),
+                self.cache_size.is_some_and(|bytes| bytes > 0) && self.cache_error.is_none(),
+            ),
             Action::Trim => {
                 let estimate = self.disk.as_ref().and_then(VmDisk::returnable);
                 (estimate.map(|bytes| format!("~{}", format_size(bytes))).unwrap_or_else(|| "Estimate unavailable".into()),
-                    "Nothing is deleted. Return unused VM disk blocks to macOS with fstrim. The estimate is Mac file allocation minus data-disk used bytes.".into(),
+                    "Nothing is deleted. Return unused VM disk blocks to this computer with fstrim. The estimate is host file allocation minus data-disk used bytes.".into(),
                     estimate.is_some_and(|bytes| bytes > 0) && self.disk_error.is_none() && self.profile.is_some())
             }
         };
@@ -433,7 +514,7 @@ impl Render for CleanupView {
             .rounded_sm()
             .child(
                 div().flex().items_center().gap_1().child("Data disk")
-                    .child(InfoTip::new("vm-disk-info", "Docker data filesystem usage, separate from the VM operating system disk. Mac allocation measures the sparse disk file's allocated blocks.")),
+                    .child(InfoTip::new("vm-disk-info", "Docker data filesystem usage, separate from the VM operating system disk. Host allocation measures the sparse disk file's allocated blocks.")),
             )
             .when_some(self.disk.as_ref(), |el, disk| {
                 el.child(Meter::new(
@@ -444,7 +525,7 @@ impl Render for CleanupView {
                 ))
             })
             .child(div().text_xs().text_color(t.text_muted).child(format!(
-                "On Mac: {}",
+                "On this computer: {}",
                 self.disk.as_ref().and_then(|disk| disk.allocated)
                     .map(format_size).unwrap_or_else(|| "unavailable".into()),
             )))
@@ -479,10 +560,11 @@ impl Render for CleanupView {
                     IconName::Layers,
                 ),
                 (
-                    Action::Trim,
-                    "Return free space to macOS",
+                    Action::ColimaCache,
+                    "Colima download cache",
                     IconName::HardDrive,
                 ),
+                (Action::Trim, "Return free space", IconName::HardDrive),
                 (
                     Action::Prune(Prune::Everything),
                     "Remove everything",
@@ -497,6 +579,8 @@ impl Render for CleanupView {
         // cannot determine their parent's height, so keep the content unconstrained.
         let content = div().w_full().flex_none().flex().flex_col().gap_2()
             .when_some(self.error.clone().or(self.list_error.clone()), |el, error| el.child(div().text_xs().child(ErrorNote::new("cleanup-error", error))))
+            .when_some(self.volumes_error.clone(), |el, error| el.child(ErrorNote::new("cleanup-volumes-error", error)))
+            .when_some(self.cache_error.clone(), |el, error| el.child(ErrorNote::new("cleanup-cache-error", error)))
             .when_some(self.result.clone(), |el, result| el.child(div().text_xs().text_color(t.success).child(result)))
             .when(!self.loaded, |el| el.child(div().text_color(t.text_muted).child("Loading disk usage…")))
             .when(self.disk.as_ref().is_some_and(VmDisk::nearly_full), |el| el.child(div().p_2().text_xs().text_color(t.warning).border_1().border_color(t.warning).rounded_sm()
@@ -711,5 +795,24 @@ impl Render for CleanupDialog {
             )
             .priority(10),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_unused_volumes_are_actionable() {
+        let usage = vec![Usage {
+            kind: "Local Volumes".into(),
+            total: 3,
+            size: 0,
+            reclaimable: 0,
+        }];
+        assert!(prune_available(Prune::Volumes, &usage, Some(2)));
+        assert!(!prune_available(Prune::Volumes, &usage, Some(0)));
+        assert!(!prune_available(Prune::Volumes, &usage, None));
+        assert!(!prune_available(Prune::Images, &usage, Some(2)));
     }
 }
