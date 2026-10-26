@@ -23,8 +23,8 @@ pub fn vm_disk(profile: &str) -> Result<crate::docker::system::VmDisk, CliError>
     } else {
         format!("colima-{profile}")
     };
-    disk.allocated = super::paths::colima_home().and_then(|home| {
-        std::fs::metadata(home.join("_lima/_disks").join(instance).join("datadisk"))
+    disk.allocated = super::paths::lima_home().and_then(|lima| {
+        std::fs::metadata(lima.join("_disks").join(instance).join("datadisk"))
             .ok()
             .and_then(|metadata| metadata.blocks().checked_mul(512))
     });

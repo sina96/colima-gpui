@@ -18,9 +18,9 @@
 set -euo pipefail
 
 export COLIMA_HOME="${SHOWCASE_HOME:-$HOME/.colima-showcase}"
-# Colima ignores COLIMA_HOME when the folder doesn't exist and falls back to ~/.colima.
-mkdir -p "$COLIMA_HOME"
 PROFILES=(web build)
+# `up` writes this into COLIMA_HOME; `down` deletes only a folder that has it.
+MARKER="$COLIMA_HOME/.colima-gpui-showcase"
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 
@@ -70,6 +70,45 @@ has_container() {
     [ -n "$(d ps -aq --filter "name=^$1\$")" ]
 }
 
+# Starts a long-running container, creating it the first time. After a VM restart the
+# containers exist but are stopped.
+ensure_running() {
+    local name="$1"
+    shift
+    if ! has_container "$name"; then
+        d run -d --name "$name" "$@" >/dev/null
+    elif [ "$(d inspect -f '{{.State.Running}}' "$name")" != true ]; then
+        d start "$name" >/dev/null
+    fi
+}
+
+# Colima ignores COLIMA_HOME when the folder doesn't exist and falls back to ~/.colima, so
+# create it first. Refuse a folder that already holds something that isn't the showcase.
+prepare_home() {
+    if [ -d "$COLIMA_HOME" ] && [ ! -f "$MARKER" ] && [ -n "$(ls -A "$COLIMA_HOME")" ]; then
+        echo "$COLIMA_HOME already exists and isn't a showcase folder; set SHOWCASE_HOME." >&2
+        exit 1
+    fi
+    mkdir -p "$COLIMA_HOME"
+    touch "$MARKER"
+}
+
+# `down` deletes profiles and the whole folder: only ever a showcase folder.
+check_owned() {
+    local real
+    real=$(cd "$COLIMA_HOME" && pwd -P)
+    case "$real" in
+        / | "$(cd "$HOME" && pwd -P)" | "$(cd "$HOME" && pwd -P)/.colima")
+            echo "Refusing to remove $real." >&2
+            exit 1
+            ;;
+    esac
+    if [ ! -f "$MARKER" ]; then
+        echo "$COLIMA_HOME has no showcase marker; not removing it." >&2
+        exit 1
+    fi
+}
+
 restore_context() {
     if [ -n "${PREVIOUS_CONTEXT:-}" ]; then
         docker context use "$PREVIOUS_CONTEXT" >/dev/null 2>&1 || true
@@ -77,6 +116,7 @@ restore_context() {
 }
 
 up() {
+    prepare_home
     check_contexts
     PREVIOUS_CONTEXT=$(docker context show 2>/dev/null || true)
     trap restore_context EXIT
@@ -104,13 +144,11 @@ up() {
     d volume create shop-pgdata >/dev/null
     d volume create old-cache >/dev/null
     d volume create scratch >/dev/null
-    has_container shop-web ||
-        d run -d --name shop-web -p 18080:80 nginx:1.27-alpine >/dev/null
-    has_container shop-cache ||
-        d run -d --name shop-cache redis:7-alpine >/dev/null
-    has_container shop-db ||
-        d run -d --name shop-db -e POSTGRES_PASSWORD=showcase \
-            -v shop-pgdata:/var/lib/postgresql/data postgres:16-alpine >/dev/null
+    ensure_running shop-web -p 18080:80 nginx:1.27-alpine
+    ensure_running shop-cache redis:7-alpine
+    ensure_running shop-db -e POSTGRES_PASSWORD=showcase \
+        -v shop-pgdata:/var/lib/postgresql/data postgres:16-alpine
+    # These two stay stopped, for the Cleanup tab.
     has_container shop-migrate ||
         d run --name shop-migrate alpine:3.20 echo "migrations applied" >/dev/null
     has_container nightly-report ||
@@ -139,16 +177,18 @@ run() {
 }
 
 down() {
+    if [ ! -d "$COLIMA_HOME" ]; then
+        say "Nothing to remove."
+        return
+    fi
+    check_owned
     for profile in "${PROFILES[@]}"; do
         if exists "$profile"; then
             say "Deleting profile '$profile'"
             colima delete -p "$profile" --force
         fi
     done
-    case "$COLIMA_HOME" in
-        "$HOME/.colima" | "$HOME/.colima/" | "$HOME" | "/") ;;
-        *) rm -rf "$COLIMA_HOME" ;;
-    esac
+    rm -rf "$COLIMA_HOME"
     # Colima adds an Include for each COLIMA_HOME to ~/.ssh/config and leaves it behind.
     local include="Include $COLIMA_HOME/ssh_config" config="$HOME/.ssh/config"
     if [ -f "$config" ] && grep -qxF "$include" "$config"; then

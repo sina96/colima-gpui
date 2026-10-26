@@ -1,27 +1,60 @@
 //! Host paths: where Colima keeps its profiles, and how to show paths. Plain Rust: no `gpui`
 //! imports.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-/// Colima's config directory: `$COLIMA_HOME` when set and the folder exists, as colima itself
-/// reads it, else `~/.colima`. Profiles live in `<home>/<profile>/` and Lima's VMs in
-/// `<home>/_lima/`.
+/// Colima's config directory, found the way colima 0.10 finds it (`config/files.go`):
+/// `$COLIMA_HOME` if it exists, then `~/.colima` if it exists, then `$XDG_CONFIG_HOME/colima`,
+/// then `~/.colima` on macOS or `~/.config/colima` elsewhere. Profiles live in
+/// `<home>/<profile>/`.
 pub fn colima_home() -> Option<PathBuf> {
     colima_home_from(
-        std::env::var_os("COLIMA_HOME").as_deref(),
-        std::env::var_os("HOME").as_deref(),
-        |dir| dir.is_dir(),
+        &Env {
+            colima_home: std::env::var_os("COLIMA_HOME"),
+            home: std::env::var_os("HOME"),
+            xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
+            macos: cfg!(target_os = "macos"),
+        },
+        |path| path.exists(),
     )
 }
 
-fn colima_home_from(
-    colima_home: Option<&std::ffi::OsStr>,
-    home: Option<&std::ffi::OsStr>,
-    is_dir: impl Fn(&Path) -> bool,
-) -> Option<PathBuf> {
-    match colima_home.filter(|dir| !dir.is_empty() && is_dir(Path::new(dir))) {
+/// Lima's directory, which holds the VM disks: `$LIMA_HOME` when set, else
+/// `<colima home>/_lima`.
+pub fn lima_home() -> Option<PathBuf> {
+    match std::env::var_os("LIMA_HOME").filter(|dir| !dir.is_empty()) {
         Some(dir) => Some(PathBuf::from(dir)),
-        None => home.map(|home| Path::new(home).join(".colima")),
+        None => colima_home().map(|home| home.join("_lima")),
+    }
+}
+
+struct Env {
+    colima_home: Option<OsString>,
+    home: Option<OsString>,
+    xdg_config_home: Option<OsString>,
+    macos: bool,
+}
+
+fn colima_home_from(env: &Env, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    let set = |var: &Option<OsString>| var.clone().filter(|value| !value.is_empty());
+    if let Some(dir) = set(&env.colima_home).map(PathBuf::from)
+        && exists(&dir)
+    {
+        return Some(dir);
+    }
+    let home = PathBuf::from(set(&env.home)?);
+    let dot_colima = home.join(".colima");
+    if exists(&dot_colima) {
+        return Some(dot_colima);
+    }
+    if let Some(xdg) = set(&env.xdg_config_home) {
+        return Some(PathBuf::from(xdg).join("colima"));
+    }
+    if env.macos {
+        Some(dot_colima)
+    } else {
+        Some(home.join(".config/colima"))
     }
 }
 
@@ -52,28 +85,53 @@ fn tilde_in(path: &str, home: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{colima_home_from, tilde_in};
-    use std::ffi::OsStr;
-    use std::path::PathBuf;
+    use super::{Env, colima_home_from, tilde_in};
+    use std::path::{Path, PathBuf};
+
+    fn env(colima_home: Option<&str>, xdg: Option<&str>, macos: bool) -> Env {
+        Env {
+            colima_home: colima_home.map(Into::into),
+            home: Some("/home/me".into()),
+            xdg_config_home: xdg.map(Into::into),
+            macos,
+        }
+    }
+
+    fn home(env: &Env, existing: &[&str]) -> PathBuf {
+        colima_home_from(env, |path| existing.iter().any(|e| Path::new(e) == path)).unwrap()
+    }
 
     #[test]
-    fn colima_home_prefers_the_env_override() {
-        let home = Some(OsStr::new("/Users/me"));
-        let showcase = Some(OsStr::new("/tmp/showcase"));
+    fn colima_home_follows_colimas_order() {
+        let showcase = env(Some("/tmp/showcase"), Some("/xdg"), false);
         assert_eq!(
-            colima_home_from(showcase, home, |_| true),
-            Some(PathBuf::from("/tmp/showcase"))
+            home(&showcase, &["/tmp/showcase"]),
+            PathBuf::from("/tmp/showcase")
         );
-        // Colima falls back to ~/.colima when the folder is missing; so do we.
+        // A missing COLIMA_HOME is ignored, as colima ignores it.
         assert_eq!(
-            colima_home_from(showcase, home, |_| false),
-            Some(PathBuf::from("/Users/me/.colima"))
+            home(&showcase, &["/home/me/.colima"]),
+            PathBuf::from("/home/me/.colima")
+        );
+        // ~/.colima wins over XDG when it exists.
+        let xdg = env(None, Some("/xdg"), false);
+        assert_eq!(
+            home(&xdg, &["/home/me/.colima"]),
+            PathBuf::from("/home/me/.colima")
+        );
+        assert_eq!(home(&xdg, &[]), PathBuf::from("/xdg/colima"));
+        assert_eq!(
+            home(&env(None, None, false), &[]),
+            PathBuf::from("/home/me/.config/colima")
         );
         assert_eq!(
-            colima_home_from(Some(OsStr::new("")), home, |_| true),
-            Some(PathBuf::from("/Users/me/.colima"))
+            home(&env(None, None, true), &[]),
+            PathBuf::from("/home/me/.colima")
         );
-        assert_eq!(colima_home_from(None, None, |_| true), None);
+        assert_eq!(
+            home(&env(Some(""), Some(""), true), &[]),
+            PathBuf::from("/home/me/.colima")
+        );
     }
 
     #[test]
