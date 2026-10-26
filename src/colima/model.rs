@@ -104,18 +104,29 @@ pub struct StartOptions {
 
 impl Default for StartOptions {
     fn default() -> Self {
-        Self {
-            cpus: 2,
-            memory_gib: 2,
-            disk_gib: 100,
-            runtime: "docker".into(),
-            vm_type: "vz".into(),
-            arch: "aarch64".into(),
-            kubernetes: false,
-            mount_type: "virtiofs".into(),
-            network_address: false,
-            activate: true,
+        host_defaults(std::env::consts::OS, std::env::consts::ARCH)
+    }
+}
+
+/// Defaults for a new profile on the given host, independent of the running platform.
+pub fn host_defaults(os: &str, arch: &str) -> StartOptions {
+    let linux = os == "linux";
+    StartOptions {
+        cpus: 2,
+        memory_gib: 2,
+        disk_gib: 100,
+        runtime: "docker".into(),
+        vm_type: if linux { "qemu" } else { "vz" }.into(),
+        arch: if arch == "x86_64" {
+            "x86_64"
+        } else {
+            "aarch64"
         }
+        .into(),
+        kubernetes: false,
+        mount_type: if linux { "sshfs" } else { "virtiofs" }.into(),
+        network_address: false,
+        activate: true,
     }
 }
 
@@ -151,11 +162,7 @@ impl StartOptions {
         colima_home: &std::path::Path,
         profile: &str,
     ) -> Result<Self, super::CliError> {
-        if profile.is_empty()
-            || !profile
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        {
+        if !crate::docker::system::valid_profile(profile) {
             return Err(super::CliError::Parse("invalid profile name".into()));
         }
         let path = colima_home.join(profile).join("colima.yaml");
@@ -227,6 +234,60 @@ impl StartOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn defaults_for_each_host() {
+        for (os, arch, vm_type, mount_type) in [
+            ("linux", "x86_64", "qemu", "sshfs"),
+            ("linux", "aarch64", "qemu", "sshfs"),
+            ("macos", "x86_64", "vz", "virtiofs"),
+            ("macos", "aarch64", "vz", "virtiofs"),
+        ] {
+            let options = host_defaults(os, arch);
+            assert_eq!(options.arch, arch);
+            assert_eq!(options.vm_type, vm_type);
+            assert_eq!(options.mount_type, mount_type);
+            let args = options.to_args();
+            assert!(args.windows(2).any(|pair| pair == ["--vm-type", vm_type]));
+            assert!(
+                args.windows(2)
+                    .any(|pair| pair == ["--mount-type", mount_type])
+            );
+        }
+    }
+
+    #[test]
+    fn reads_cli_profile_names_without_allowing_path_traversal() {
+        let home = std::env::temp_dir().join(format!("t59-config-{}", std::process::id()));
+        std::fs::create_dir(&home).unwrap();
+        for profile in ["my_vm", "Dev", "dev.test"] {
+            let directory = home.join(profile);
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::write(
+                directory.join("colima.yaml"),
+                include_str!("../../tests/fixtures/colima_config.yaml"),
+            )
+            .unwrap();
+            let options = StartOptions::read_config_at(&home, profile).unwrap();
+            assert_eq!(options.cpus, 4);
+            assert_eq!(options.mount_type, "9p");
+        }
+        for profile in [
+            "",
+            ".",
+            "..",
+            "../default",
+            "/default",
+            "dev/nested",
+            "dev\\nested",
+        ] {
+            assert!(matches!(
+                StartOptions::read_config_at(&home, profile),
+                Err(super::super::CliError::Parse(_))
+            ));
+        }
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
     #[test]
     fn config_and_all_flags() {
         let options =

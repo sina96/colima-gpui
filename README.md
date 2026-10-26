@@ -32,7 +32,7 @@
 ## Features
 
 - **Profiles:**
-  - Create, start, stop, restart, edit and delete Colima profiles: CPU, memory, disk, runtime, VM type, mounts and Kubernetes.
+  - Create, start, stop, restart, edit and delete Colima profiles: CPU, memory, disk, runtime, VM type, mount type and Kubernetes.
   - Live status and start-up logs.
 - **Overview:**
   - CPU, memory and disk usage per profile.

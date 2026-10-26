@@ -11,17 +11,23 @@ use gpui::{
 
 use crate::colima::Instance;
 use crate::colima::model::StartOptions;
-use crate::theme::{ActiveTheme, Theme};
+use crate::theme::ActiveTheme;
 use crate::ui::button::ButtonSize;
 use crate::ui::select::{Select, SelectChanged};
 use crate::ui::stepper::{Stepper, StepperChanged};
 use crate::ui::text_input::{TextInput, TextInputEvent};
-use crate::ui::{Button, ButtonStyle, InfoTip};
+use crate::ui::{Button, ButtonStyle, InfoTip, Switch};
 
 const RUNTIMES: &[&str] = &["docker", "containerd", "incus"];
+#[cfg(not(target_os = "linux"))]
 const VM_TYPES: &[&str] = &["vz", "qemu", "krunkit"];
+#[cfg(target_os = "linux")]
+const VM_TYPES: &[&str] = &["qemu"];
 const ARCHES: &[&str] = &["aarch64", "x86_64"];
+#[cfg(not(target_os = "linux"))]
 const MOUNT_TYPES: &[&str] = &["virtiofs", "sshfs", "9p"];
+#[cfg(target_os = "linux")]
+const MOUNT_TYPES: &[&str] = &["sshfs", "9p"];
 const MAX_MEMORY_GIB: i32 = 64;
 const MAX_DISK_GIB: i32 = 2000;
 
@@ -71,10 +77,7 @@ impl EventEmitter<ProfileFormEvent> for ProfileForm {}
 
 impl ProfileForm {
     pub fn create(existing: Vec<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let initial = StartOptions {
-            arch: host_arch().to_owned(),
-            ..StartOptions::default()
-        };
+        let initial = StartOptions::default();
         let this = Self::build(FormMode::Create { existing }, initial, None, cx);
         window.focus(&this.name.focus_handle(cx), cx);
         this
@@ -274,48 +277,23 @@ impl ProfileForm {
         &self,
         id: &'static str,
         on: bool,
-        theme: &Theme,
         toggle: fn(&mut Self),
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .id(id)
-            .flex()
-            .items_center()
-            .gap_2()
-            .h(px(28.))
-            .tab_stop(true)
-            .cursor_pointer()
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(16.))
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(if on { theme.accent } else { theme.border })
-                    .when(on, |el| el.bg(theme.accent))
-                    .text_xs()
-                    .text_color(theme.editor_background)
-                    .when(on, |el| el.child("✓")),
+                Switch::new("switch", on).on_toggle(cx.listener(move |this, _, _, cx| {
+                    toggle(this);
+                    cx.notify();
+                })),
             )
-            .child(div().text_sm().text_color(theme.text_muted).child(if on {
-                "On"
-            } else {
-                "Off"
-            }))
-            .focus_visible(|s| s.border_1().border_color(theme.border_focused).rounded_sm())
             .on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "space" {
                     toggle(this);
                     cx.stop_propagation();
                     cx.notify();
                 }
-            }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                toggle(this);
-                cx.notify();
             }))
             .into_any_element()
     }
@@ -376,7 +354,6 @@ impl Render for ProfileForm {
             self.render_toggle(
                 "kubernetes",
                 self.kubernetes,
-                &theme,
                 |this| this.kubernetes = !this.kubernetes,
                 cx,
             ),
@@ -386,7 +363,6 @@ impl Render for ProfileForm {
             self.render_toggle(
                 "network-address",
                 self.network_address,
-                &theme,
                 |this| this.network_address = !this.network_address,
                 cx,
             ),
@@ -396,7 +372,6 @@ impl Render for ProfileForm {
             self.render_toggle(
                 "activate",
                 self.activate,
-                &theme,
                 |this| this.activate = !this.activate,
                 cx,
             ),
@@ -509,7 +484,7 @@ fn gib(bytes: u64) -> u32 {
     (bytes / (1 << 30)) as u32
 }
 
-/// Architecture name colima uses for this Mac.
+/// Architecture name Colima uses for this host.
 pub fn host_arch() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "x86_64",
@@ -565,6 +540,7 @@ mod tests {
         assert!(validate_name("dev-2", &existing).is_ok());
         assert!(validate_name("", &existing).is_err());
         assert!(validate_name("Dev", &existing).is_err());
+        assert!(validate_name("my_vm", &existing).is_err());
         assert!(validate_name("a b", &existing).is_err());
         assert!(validate_name("../x", &existing).is_err());
         assert!(validate_name("-x", &existing).is_err());
@@ -575,7 +551,7 @@ mod tests {
     fn option_combinations() {
         let ok = StartOptions {
             arch: "aarch64".into(),
-            ..StartOptions::default()
+            ..crate::colima::model::host_defaults("macos", "aarch64")
         };
         assert!(validate_options(&ok, "aarch64").is_ok());
 
