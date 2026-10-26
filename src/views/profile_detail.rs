@@ -1357,6 +1357,7 @@ fn overview_value(theme: &Theme, label: &str, value: String, mono: bool) -> AnyE
 
 fn copy_value(theme: &Theme, label: &str, value: String, id: &'static str) -> AnyElement {
     let copied = value.clone();
+    let value = crate::colima::paths::tilde(&value);
     div()
         .flex()
         .flex_col()

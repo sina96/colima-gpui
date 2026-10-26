@@ -253,14 +253,19 @@ pub fn parse_reclaimed(stdout: &str) -> Result<u64, CliError> {
 }
 
 /// Docker tab views are constructed with only a socket. Recover the profile from
-/// Colima's standard socket path; never silently fall back to default.
+/// Colima's socket path, `<colima home>/<profile>/docker.sock`; never silently fall back to
+/// default.
 pub fn profile_from_socket(socket: &str) -> Option<String> {
+    profile_from_socket_in(socket, &crate::colima::paths::colima_home()?)
+}
+
+fn profile_from_socket_in(socket: &str, colima_home: &std::path::Path) -> Option<String> {
     let path = std::path::Path::new(socket.strip_prefix("unix://").unwrap_or(socket));
     if path.file_name()?.to_str()? != "docker.sock" {
         return None;
     }
     let parent = path.parent()?;
-    if parent.parent()?.file_name()?.to_str()? != ".colima" {
+    if parent.parent()? != colima_home {
         return None;
     }
     let profile = parent.file_name()?.to_str()?;
@@ -362,15 +367,27 @@ mod tests {
     }
     #[test]
     fn socket_profile_is_explicit() {
+        let home = std::path::Path::new("/Users/me/.colima");
+        let profile = |socket| profile_from_socket_in(socket, home);
         assert_eq!(
-            profile_from_socket("unix:///Users/me/.colima/gpui-test/docker.sock").as_deref(),
+            profile("unix:///Users/me/.colima/gpui-test/docker.sock").as_deref(),
             Some("gpui-test")
         );
         assert_eq!(
-            profile_from_socket("/Users/me/.colima/default/docker.sock").as_deref(),
+            profile("/Users/me/.colima/default/docker.sock").as_deref(),
             Some("default")
         );
-        assert!(profile_from_socket("unix:///var/run/docker.sock").is_none());
+        assert!(profile("unix:///var/run/docker.sock").is_none());
+        // A profile from another COLIMA_HOME is not this app's to clean up.
+        assert!(profile("unix:///Users/me/.other/default/docker.sock").is_none());
+        assert_eq!(
+            profile_from_socket_in(
+                "unix:///Users/me/.colima-showcase/web/docker.sock",
+                std::path::Path::new("/Users/me/.colima-showcase")
+            )
+            .as_deref(),
+            Some("web")
+        );
         assert!(!valid_profile("../default"));
     }
 }

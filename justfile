@@ -13,6 +13,15 @@ run:
 gallery:
     cargo run --example ui_gallery
 
+# Open the app on demo profiles for screenshots (kept in ~/.colima-showcase, apart from yours).
+showcase:
+    ./scripts/showcase.sh up
+    ./scripts/showcase.sh run
+
+# Delete the demo profiles that `just showcase` made.
+showcase-down:
+    ./scripts/showcase.sh down
+
 # Build the app (debug).
 build:
     cargo build
