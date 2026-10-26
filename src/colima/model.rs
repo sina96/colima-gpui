@@ -111,6 +111,10 @@ pub struct StartOptions {
     /// None disables mounts; Some(empty) uses Colima's writable home mount.
     pub mounts: Option<Vec<Mount>>,
     pub network_address: bool,
+    /// Empty uses Colima's DNS resolver.
+    pub dns: Vec<String>,
+    pub network_mode: String,
+    pub network_interface: String,
     /// Switch the Docker/Kubernetes context to this profile on start. Not stored in
     /// `colima.yaml`; colima's own default is `true`.
     pub activate: bool,
@@ -143,6 +147,9 @@ pub fn host_defaults(os: &str, arch: &str) -> StartOptions {
         mount_type: if linux { "sshfs" } else { "virtiofs" }.into(),
         mounts: Some(Vec::new()),
         network_address: false,
+        dns: Vec::new(),
+        network_mode: "shared".into(),
+        network_interface: "en0".into(),
         activate: true,
     }
 }
@@ -201,6 +208,24 @@ impl StartOptions {
                 }
             }
         }
+        // Send an explicit empty slice to clear previously saved DNS servers.
+        if self.dns.is_empty() {
+            args.extend(["--dns".into(), String::new()]);
+        } else {
+            for server in &self.dns {
+                args.extend(["--dns".into(), server.clone()]);
+            }
+        }
+        // Colima registers mode/interface only on macOS. Preserve the saved
+        // interface even when shared mode hides its form field.
+        if cfg!(target_os = "macos") {
+            args.extend([
+                "--network-mode".into(),
+                self.network_mode.clone(),
+                "--network-interface".into(),
+                self.network_interface.clone(),
+            ]);
+        }
         args
     }
 
@@ -232,6 +257,7 @@ impl StartOptions {
     pub fn parse_config(text: &str) -> Result<Self, super::CliError> {
         let mut options = Self {
             mounts: parse_mounts(text)?,
+            dns: parse_dns(text)?,
             ..Self::default()
         };
         let mut section = "";
@@ -291,11 +317,69 @@ impl StartOptions {
                     options.kubernetes_version = value.to_owned();
                 }
                 (true, "network", "address") => options.network_address = boolean()?,
+                (true, "network", "mode") => {
+                    if !matches!(value, "shared" | "bridged") {
+                        return Err(error());
+                    }
+                    options.network_mode = value.to_owned();
+                }
+                (true, "network", "interface") => options.network_interface = string()?,
                 _ => {}
             }
         }
         Ok(options)
     }
+}
+
+/// Colima emits DNS as a block IP list (or [] when using its resolver).
+fn parse_dns(text: &str) -> Result<Vec<String>, super::CliError> {
+    let error = || super::CliError::Parse("unsupported network.dns configuration".into());
+    let mut network = false;
+    let mut dns_indent = None;
+    let mut servers = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if indent == 0 && !trimmed.starts_with('-') {
+            network = trimmed == "network:" || trimmed.starts_with("network: #");
+            dns_indent = None;
+            continue;
+        }
+        if !network {
+            continue;
+        }
+        if let Some(level) = dns_indent {
+            if trimmed.starts_with("- ") && indent >= level {
+                let value = mount_scalar(&trimmed[2..])?;
+                value.parse::<std::net::IpAddr>().map_err(|_| error())?;
+                servers.push(value);
+                continue;
+            }
+            if indent > level {
+                return Err(error());
+            }
+            dns_indent = None;
+        }
+        if let Some(raw) = trimmed.strip_prefix("dns:") {
+            let raw = raw.split(" #").next().unwrap_or(raw).trim();
+            match raw {
+                "" => dns_indent = Some(indent),
+                "[]" | "null" | "~" => {}
+                value if value.starts_with('[') && value.ends_with(']') => {
+                    for raw in value[1..value.len() - 1].split(',') {
+                        let value = mount_scalar(raw)?;
+                        value.parse::<std::net::IpAddr>().map_err(|_| error())?;
+                        servers.push(value);
+                    }
+                }
+                _ => return Err(error()),
+            }
+        }
+    }
+    Ok(servers)
 }
 
 /// Colima emits a block list, [] for defaults, and null for disabled mounts.
@@ -470,7 +554,10 @@ mod tests {
         if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             expected.push("--vz-rosetta=false");
         }
-        expected.extend(["--kubernetes-version", "", "--mount", "~"]);
+        expected.extend(["--kubernetes-version", "", "--mount", "~", "--dns", ""]);
+        if cfg!(target_os = "macos") {
+            expected.extend(["--network-mode", "shared", "--network-interface", "en0"]);
+        }
         assert_eq!(options.to_args(), expected);
         assert!(
             StartOptions::default()
@@ -612,6 +699,63 @@ mod tests {
             "mounts:\n  - location: [one, two]",
             "mounts:\n  - location: \"unterminated",
             "mounts:\n  - location: /tmp\n    unknown: value",
+        ] {
+            assert!(StartOptions::parse_config(config).is_err(), "{config}");
+        }
+    }
+
+    #[test]
+    fn network_config_and_flags() {
+        // Extend the captured configuration with Colima's generated network shape.
+        let config = include_str!("../../tests/fixtures/colima_config.yaml").replace(
+            "  address: true",
+            "  address: true\n  mode: bridged\n  interface: en1\n  dns:\n    - 1.1.1.1\n    - 2606:4700:4700::1111\n  dnsHosts:\n    example.com: 192.0.2.1",
+        );
+        let options = StartOptions::parse_config(&config).unwrap();
+        assert_eq!(options.dns, ["1.1.1.1", "2606:4700:4700::1111"]);
+        assert_eq!(options.network_mode, "bridged");
+        assert_eq!(options.network_interface, "en1");
+        let args = options.to_args();
+        let servers: Vec<_> = args
+            .windows(2)
+            .filter(|pair| pair[0] == "--dns")
+            .map(|pair| pair[1].as_str())
+            .collect();
+        assert_eq!(servers, ["1.1.1.1", "2606:4700:4700::1111"]);
+        assert_eq!(
+            args.windows(2)
+                .any(|pair| pair == ["--network-mode", "bridged"]),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(
+            args.windows(2)
+                .any(|pair| pair == ["--network-interface", "en1"]),
+            cfg!(target_os = "macos")
+        );
+        for value in ["[]", "null", "~", ""] {
+            let options =
+                StartOptions::parse_config(&format!("network:\n  dns: {value}\n  address: false"))
+                    .unwrap();
+            assert!(options.dns.is_empty());
+            assert!(
+                options
+                    .to_args()
+                    .windows(2)
+                    .any(|pair| pair == ["--dns", ""])
+            );
+        }
+        for value in ["[1.1.1.1, '::1']", "\n  - 1.1.1.1\n  - '::1'"] {
+            let options =
+                StartOptions::parse_config(&format!("network:\n  dns: {value}\n  mode: shared"))
+                    .unwrap();
+            assert_eq!(options.dns, ["1.1.1.1", "::1"]);
+        }
+        for config in [
+            "network:\n  dns: [example.com]",
+            "network:\n  dns:\n    - 999.1.1.1",
+            "network:\n  dns: 1.1.1.1",
+            "network:\n  mode: invalid",
+            "network:\n  interface: [en0]",
         ] {
             assert!(StartOptions::parse_config(config).is_err(), "{config}");
         }

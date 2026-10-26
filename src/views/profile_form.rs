@@ -43,6 +43,8 @@ pub enum FormMode {
     },
 }
 
+// Kept inline to preserve the form event API; there is only one payload variant.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileFormEvent {
     Cancelled,
@@ -82,6 +84,9 @@ pub struct ProfileForm {
     rosetta: bool,
     advanced_open: bool,
     network_address: bool,
+    dns: Entity<TextInput>,
+    network_mode: Entity<Select<&'static str>>,
+    network_interface: Entity<TextInput>,
     activate: bool,
     load_warning: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
@@ -182,6 +187,19 @@ impl ProfileForm {
             input
         });
 
+        let dns = cx.new(|cx| {
+            let mut input =
+                TextInput::new(cx).placeholder("Colima default (e.g. 1.1.1.1, 8.8.8.8)");
+            input.set_text(initial.dns.join(", "), cx);
+            input
+        });
+        let network_mode = select(&["shared", "bridged"], &initial.network_mode, cx);
+        let network_interface = cx.new(|cx| {
+            let mut input = TextInput::new(cx).placeholder("e.g. en0");
+            input.set_text(initial.network_interface.clone(), cx);
+            input
+        });
+
         let mounts: Vec<_> = initial
             .mounts
             .as_deref()
@@ -191,7 +209,7 @@ impl ProfileForm {
             .map(|(id, mount)| mount_row(id, mount, cx))
             .collect();
         let next_mount_id = mounts.len();
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             cx.subscribe(&name, |this, _, event: &TextInputEvent, cx| match event {
                 TextInputEvent::Changed => {
                     this.name_touched = true;
@@ -223,8 +241,25 @@ impl ProfileForm {
             ),
         ];
 
+        for input in [&dns, &network_interface] {
+            subscriptions.push(cx.subscribe(
+                input,
+                |this, _, event: &TextInputEvent, cx| match event {
+                    TextInputEvent::Changed => cx.notify(),
+                    TextInputEvent::Submitted => this.submit(cx),
+                },
+            ));
+        }
+        subscriptions.push(cx.subscribe(
+            &network_mode,
+            |_, _, _: &SelectChanged<&'static str>, cx| cx.notify(),
+        ));
+
         Self {
             mode,
+            dns,
+            network_mode,
+            network_interface,
             no_mounts: initial.mounts.is_none(),
             mounts,
             next_mount_id,
@@ -278,6 +313,13 @@ impl ProfileForm {
                     .collect()
             }),
             network_address: self.network_address,
+            dns: dns_servers(self.dns.read(cx).text()),
+            network_mode: if matches!(self.mode, FormMode::Create { .. }) {
+                value(&self.network_mode)
+            } else {
+                self.initial.network_mode.clone()
+            },
+            network_interface: self.network_interface.read(cx).text().trim().to_owned(),
             activate: self.activate,
         }
     }
@@ -614,6 +656,15 @@ impl Render for ProfileForm {
                             div().flex().flex_col().gap_3()
                                 .child(advanced_heading("Mounts", cx))
                                 .child(advanced_heading("Network", cx))
+                                .child(advanced_row("DNS servers", self.dns.clone().into_any_element(), cx))
+                                .when(cfg!(target_os = "macos"), |el| {
+                                    el.child(advanced_row("Mode", if creating { self.network_mode.clone().into_any_element() } else { fixed(&options.network_mode) }, cx))
+                                        .when(options.network_mode == "bridged", |el| {
+                                            el.child(advanced_row("Host interface", self.network_interface.clone().into_any_element(), cx))
+                                        })
+                                        .child(div().text_sm().text_color(theme.text_muted)
+                                            .child("Shared and bridged modes require Network address to be enabled. Mode is fixed after creation."))
+                                })
                                 .child(advanced_heading("Kubernetes", cx))
                                 .when(self.kubernetes, |el| {
                                     el.child(
@@ -664,6 +715,33 @@ fn mount_row(id: usize, mount: &Mount, cx: &mut Context<ProfileForm>) -> MountRo
         writable: mount.writable,
         mount_point: mount.mount_point.clone(),
         _subscription: subscription,
+    }
+}
+
+fn advanced_row(label: &'static str, control: AnyElement, cx: &App) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .min_h(px(40.))
+        .child(
+            div()
+                .w(px(200.))
+                .flex_none()
+                .text_sm()
+                .text_color(cx.theme().text_muted)
+                .child(label),
+        )
+        .child(div().flex_1().min_w_0().max_w(px(320.)).child(control))
+}
+
+/// Comma-separated addresses; an empty field restores Colima's resolver.
+fn dns_servers(text: &str) -> Vec<String> {
+    if text.trim().is_empty() {
+        Vec::new()
+    } else {
+        text.split(',')
+            .map(|server| server.trim().to_owned())
+            .collect()
     }
 }
 
@@ -739,6 +817,27 @@ pub fn validate_options(options: &StartOptions, host_arch: &str) -> Result<(), S
     if options.vm_type == "krunkit" && host_arch != "aarch64" {
         return Err("krunkit needs an Apple silicon Mac.".into());
     }
+    if options
+        .dns
+        .iter()
+        .any(|server| server.parse::<std::net::IpAddr>().is_err())
+    {
+        return Err("DNS servers must be IP addresses separated by commas.".into());
+    }
+    if cfg!(target_os = "macos") {
+        if !matches!(options.network_mode.as_str(), "shared" | "bridged") {
+            return Err("Choose shared or bridged network mode.".into());
+        }
+        if options.network_mode == "bridged"
+            && (options.network_interface.is_empty()
+                || !options
+                    .network_interface
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)))
+        {
+            return Err("Give the host interface a name, such as en0.".into());
+        }
+    }
     if let Some(mounts) = &options.mounts {
         for mount in mounts {
             let path = &mount.location;
@@ -772,6 +871,37 @@ mod tests {
         assert!(validate_name("../x", &existing).is_err());
         assert!(validate_name("-x", &existing).is_err());
         assert!(validate_name("default", &existing).is_err());
+    }
+
+    #[test]
+    fn network_options() {
+        let mut options = crate::colima::model::host_defaults("macos", "aarch64");
+        for input in ["", "1.1.1.1", "1.1.1.1, 2606:4700:4700::1111"] {
+            options.dns = dns_servers(input);
+            assert!(validate_options(&options, "aarch64").is_ok(), "{input}");
+        }
+        for input in [
+            "example.com",
+            "1.1.1.1,",
+            ",1.1.1.1",
+            "999.1.1.1",
+            "1.1.1.1 8.8.8.8",
+        ] {
+            options.dns = dns_servers(input);
+            assert!(validate_options(&options, "aarch64").is_err(), "{input}");
+        }
+        options.dns.clear();
+        if cfg!(target_os = "macos") {
+            options.network_mode = "bridged".into();
+            for interface in ["en0", "bridge100", "bridge-test.1"] {
+                options.network_interface = interface.into();
+                assert!(validate_options(&options, "aarch64").is_ok());
+            }
+            for interface in ["", "en 0", "en0\n"] {
+                options.network_interface = interface.into();
+                assert!(validate_options(&options, "aarch64").is_err());
+            }
+        }
     }
 
     #[test]
