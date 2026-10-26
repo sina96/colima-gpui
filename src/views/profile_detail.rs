@@ -5,6 +5,7 @@ use gpui::{
     Subscription, Task, Window, container_query, div, prelude::*, px,
 };
 
+use crate::colima::commands::{self, KubernetesOp};
 use crate::colima::{Instance, model::gib};
 use crate::store::{LoadState, Op, ProfileStore, Selection};
 use crate::theme::{ActiveTheme, MONO_FONT, Theme};
@@ -150,6 +151,12 @@ pub struct ProfileDetail {
     store: Entity<ProfileStore>,
     /// Open delete confirmation and the profile it targets.
     confirm: Option<(Entity<ConfirmDialog>, String, Subscription)>,
+    kubernetes_confirm: Option<(Entity<ConfirmDialog>, Subscription)>,
+    kubernetes_busy: std::collections::HashMap<String, KubernetesOp>,
+    kubernetes_errors: std::collections::HashMap<String, String>,
+    kubernetes_status: std::collections::HashMap<String, Result<bool, String>>,
+    kubernetes_fetching: std::collections::HashSet<String>,
+    kubernetes_generation: u64,
     /// Form for `Selection::NewProfile` / `EditProfile`, rebuilt when the selection changes.
     form: Option<(Selection, Entity<ProfileForm>, Subscription)>,
     tab: ProfileTab,
@@ -176,11 +183,29 @@ impl ProfileDetail {
             if !keep_usage {
                 this.usage = None;
             }
+            let running: Vec<_> = store
+                .instances()
+                .iter()
+                .filter(|i| i.is_running())
+                .map(|i| i.name.clone())
+                .collect();
+            this.kubernetes_status
+                .retain(|name, _| running.contains(name));
+            if let Some(instance) = store.selected_instance().filter(|i| i.is_running()) {
+                let profile = instance.name.clone();
+                this.refresh_kubernetes_status(profile, cx);
+            }
             cx.notify();
         });
         Self {
             store,
             confirm: None,
+            kubernetes_confirm: None,
+            kubernetes_busy: Default::default(),
+            kubernetes_errors: Default::default(),
+            kubernetes_status: Default::default(),
+            kubernetes_fetching: Default::default(),
+            kubernetes_generation: 0,
             form: None,
             tab: ProfileTab::Overview,
             tab_profile: None,
@@ -350,8 +375,105 @@ impl ProfileDetail {
     }
 
     fn run(&mut self, op: Op, profile: String, cx: &mut Context<Self>) {
+        if self.kubernetes_busy.contains_key(&profile) {
+            return;
+        }
         self.store
             .update(cx, |store, cx| store.run(op, profile, cx));
+    }
+
+    fn run_kubernetes(&mut self, profile: String, op: KubernetesOp, cx: &mut Context<Self>) {
+        let store = self.store.read(cx);
+        if self.kubernetes_busy.contains_key(&profile)
+            || store.busy(&profile).is_some()
+            || !store
+                .instances()
+                .iter()
+                .any(|i| i.name == profile && i.is_running())
+        {
+            return;
+        }
+        self.kubernetes_busy.insert(profile.clone(), op);
+        self.kubernetes_generation += 1;
+        self.kubernetes_errors.remove(&profile);
+        let name = profile.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { commands::kubernetes(&name, op) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.kubernetes_busy.remove(&profile);
+                this.kubernetes_status.remove(&profile);
+                if let Err(error) = result {
+                    this.kubernetes_errors
+                        .insert(profile.clone(), crate::colima::cli::describe(&error));
+                }
+                this.refresh_kubernetes_status(profile, cx);
+                this.store.update(cx, |store, cx| store.refresh(cx));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn refresh_kubernetes_status(&mut self, profile: String, cx: &mut Context<Self>) {
+        if self.kubernetes_busy.contains_key(&profile)
+            || !self.kubernetes_fetching.insert(profile.clone())
+        {
+            return;
+        }
+        let name = profile.clone();
+        let generation = self.kubernetes_generation;
+        let task = cx.background_executor().spawn(async move {
+            commands::status(&name)
+                .map(|status| status.kubernetes)
+                .map_err(|error| crate::colima::cli::describe(&error))
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.kubernetes_fetching.remove(&profile);
+                // A poll started before an action must not overwrite its state.
+                if generation == this.kubernetes_generation
+                    && !this.kubernetes_busy.contains_key(&profile)
+                {
+                    this.kubernetes_status.insert(profile, result);
+                } else if !this.kubernetes_busy.contains_key(&profile) {
+                    this.refresh_kubernetes_status(profile, cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn confirm_kubernetes_reset(
+        &mut self,
+        profile: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dialog = cx.new(|cx| {
+            ConfirmDialog::new(
+                format!("Reset Kubernetes on “{profile}”?"),
+                "This deletes all Kubernetes objects and cluster data, then starts a fresh cluster. The VM stays running.",
+                cx,
+            ).confirm_label("Reset Kubernetes")
+        });
+        let subscription = cx.subscribe(&dialog, move |this, _, result, cx| {
+            this.kubernetes_confirm = None;
+            if *result == DialogResult::Confirmed {
+                this.run_kubernetes(profile.clone(), KubernetesOp::Reset, cx);
+            }
+            cx.notify();
+        });
+        dialog.update(cx, |dialog, cx| dialog.show(window, cx));
+        self.kubernetes_confirm = Some((dialog, subscription));
+        cx.notify();
     }
 
     fn confirm_delete(&mut self, profile: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -456,13 +578,17 @@ impl ProfileDetail {
     }
 
     fn render_profile(&mut self, inst: &Instance, cx: &mut Context<Self>) -> AnyElement {
+        if inst.is_running() && !self.kubernetes_status.contains_key(&inst.name) {
+            self.refresh_kubernetes_status(inst.name.clone(), cx);
+        }
         let theme = cx.theme().clone();
         let store = self.store.read(cx);
         let busy = store.busy(&inst.name);
         let error = store.error(&inst.name).cloned();
         let status = store.status(&inst.name).cloned();
         let running = inst.is_running();
-        let any_busy = busy.is_some();
+        let kubernetes_busy = self.kubernetes_busy.get(&inst.name).copied();
+        let any_busy = busy.is_some() || kubernetes_busy.is_some();
         let name = inst.name.clone();
         let docker_ok = running && inst.is_docker();
         let socket = status
@@ -643,9 +769,22 @@ impl ProfileDetail {
             docker_body.child(div().text_color(theme.text_muted).child("Not using Docker"))
         };
         let docker = overview_card(&theme, "Docker", IconName::Layers, docker_body);
-        let kubernetes = status
-            .as_ref()
-            .map(|s| if s.kubernetes { "On" } else { "Off" });
+        // `colima list` reports saved configuration, not the live k3s service.
+        let kubernetes_status = self.kubernetes_status.get(&name);
+        let kubernetes_on = matches!(kubernetes_status, Some(Ok(true)));
+        let kubernetes_known = matches!(kubernetes_status, Some(Ok(_)));
+        let kubernetes = if running {
+            match kubernetes_status {
+                Some(Ok(true)) => "On",
+                Some(Ok(false)) => "Off",
+                Some(Err(_)) => "Unavailable",
+                None => "Loading…",
+            }
+        } else {
+            missing_status
+        };
+        let kubernetes_name = name.clone();
+        let reset_name = name.clone();
         let mut network = Some(overview_card(
             &theme,
             "Network + Kubernetes",
@@ -664,9 +803,82 @@ impl ProfileDetail {
                 .child(overview_value(
                     &theme,
                     "Kubernetes",
-                    kubernetes.unwrap_or(missing_status).into(),
+                    kubernetes.into(),
                     false,
-                )),
+                ))
+                .when(running, |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_1()
+                            .pt_1()
+                            .child(
+                                Button::new(
+                                    "kubernetes-toggle",
+                                    if kubernetes_on {
+                                        "Stop Kubernetes"
+                                    } else {
+                                        "Start Kubernetes"
+                                    },
+                                )
+                                .disabled(any_busy || !kubernetes_known)
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        this.run_kubernetes(
+                                            kubernetes_name.clone(),
+                                            if kubernetes_on {
+                                                KubernetesOp::Stop
+                                            } else {
+                                                KubernetesOp::Start
+                                            },
+                                            cx,
+                                        );
+                                    },
+                                )),
+                            )
+                            .child(
+                                Button::new("kubernetes-reset", "Reset…")
+                                    .disabled(any_busy || !kubernetes_known)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.confirm_kubernetes_reset(
+                                            reset_name.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                            ),
+                    )
+                })
+                .when_some(kubernetes_busy, |el, op| {
+                    el.child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.text_muted)
+                            .child(op.progress_label()),
+                    )
+                })
+                .when_some(self.kubernetes_errors.get(&name).cloned(), |el, error| {
+                    el.child(
+                        ErrorNote::new("kubernetes-error", "Kubernetes action failed")
+                            .details(error),
+                    )
+                })
+                .when_some(
+                    kubernetes_status
+                        .and_then(|status| status.as_ref().err())
+                        .cloned(),
+                    |el, error| {
+                        el.child(
+                            ErrorNote::new(
+                                "kubernetes-status-error",
+                                "Kubernetes status unavailable",
+                            )
+                            .details(error),
+                        )
+                    },
+                ),
         ));
         let usage = self.usage.as_ref().map(|(_, usage)| usage.clone());
         let disk_full = usage
@@ -1068,6 +1280,9 @@ impl Render for ProfileDetail {
             .bg(theme.editor_background)
             .child(content)
             .when_some(self.confirm.as_ref(), |el, (dialog, _, _)| {
+                el.child(dialog.clone())
+            })
+            .when_some(self.kubernetes_confirm.as_ref(), |el, (dialog, _)| {
                 el.child(dialog.clone())
             })
     }
