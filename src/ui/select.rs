@@ -1,8 +1,8 @@
 //! Fixed-option select; floating layer follows the pinned GPUI popover example.
 use crate::theme::ActiveTheme;
 use gpui::{
-    Context, EventEmitter, FocusHandle, SharedString, Window, anchored, deferred, div, prelude::*,
-    px,
+    Bounds, Context, EventEmitter, FocusHandle, Pixels, SharedString, Window, anchored, deferred,
+    div, prelude::*, px,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +13,7 @@ pub struct Select<T: Clone + PartialEq + 'static> {
     selected: Option<usize>,
     highlighted: usize,
     open: bool,
+    trigger_bounds: Bounds<Pixels>,
     focus: FocusHandle,
 }
 impl<T: Clone + PartialEq + 'static> EventEmitter<SelectChanged<T>> for Select<T> {}
@@ -24,6 +25,7 @@ impl<T: Clone + PartialEq + 'static> Select<T> {
             selected,
             highlighted: 0,
             open: false,
+            trigger_bounds: Bounds::default(),
             focus: cx.focus_handle().tab_stop(true),
         }
     }
@@ -97,6 +99,17 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
             })
             .collect::<Vec<_>>();
         div()
+            .on_children_prepainted({
+                let this = cx.entity().downgrade();
+                move |bounds, _, cx| {
+                    this.update(cx, |this, _| {
+                        if let Some(bounds) = bounds.first() {
+                            this.trigger_bounds = *bounds;
+                        }
+                    })
+                    .ok();
+                }
+            })
             .id("select")
             .track_focus(&self.focus)
             .tab_stop(true)
@@ -177,10 +190,16 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
                                 .border_color(t.border)
                                 .bg(t.elevated_surface_background)
                                 .children(rows)
-                                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                    this.open = false;
-                                    cx.notify();
-                                })),
+                                .on_mouse_down_out(cx.listener(
+                                    |this, event: &gpui::MouseDownEvent, _, cx| {
+                                        // The trigger handles its own click on mouse-up. Closing
+                                        // here first would make that same click reopen the list.
+                                        if !this.trigger_bounds.contains(&event.position) {
+                                            this.open = false;
+                                            cx.notify();
+                                        }
+                                    },
+                                )),
                         ),
                     )
                     .priority(2),

@@ -551,6 +551,11 @@ impl Render for Gallery {
                     .child(labeled("Memory (1–8 GiB)", t.text_muted, self.memory.clone())),
             ))
             .child(
+                div().text_xs().text_color(t.text_muted).child(
+                    "Select: click Runtime to open or close; click elsewhere or press Escape to dismiss; choose an option to change it.",
+                ),
+            )
+            .child(
                 div().flex().gap_2().children(
                     [ButtonSize::Default, ButtonSize::Medium, ButtonSize::Large]
                         .into_iter()
