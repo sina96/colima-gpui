@@ -126,24 +126,31 @@ impl RenderOnce for DetailPage {
                     .child(
                         div()
                             .flex()
+                            .flex_1()
                             .items_center()
                             .gap_2()
                             .min_w_0()
                             .child(
-                                Button::new("detail-back", "← Back")
-                                    .size(ButtonSize::Medium)
-                                    .tooltip("Back (Esc)")
-                                    .on_click(move |_, window, cx| {
-                                        if let Some(back) = &back_click {
-                                            back(window, cx);
-                                        }
-                                    }),
+                                div().flex_none().child(
+                                    Button::new("detail-back", "← Back")
+                                        .size(ButtonSize::Medium)
+                                        .tooltip("Back (Esc)")
+                                        .on_click(move |_, window, cx| {
+                                            if let Some(back) = &back_click {
+                                                back(window, cx);
+                                            }
+                                        }),
+                                ),
                             )
-                            .children(self.status)
-                            .child(div().text_lg().truncate().child(self.title))
+                            // Navigation and status keep their width as action results grow.
+                            .when_some(self.status, |el, status| {
+                                el.child(div().flex_none().child(status))
+                            })
+                            .child(div().min_w_0().text_lg().truncate().child(self.title))
                             .when_some(self.subtitle, |el, subtitle| {
                                 el.child(
                                     div()
+                                        .min_w_0()
                                         .text_sm()
                                         .truncate()
                                         .text_color(theme.text_muted)
