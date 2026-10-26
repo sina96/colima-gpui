@@ -76,6 +76,10 @@ pub struct ProfileStore {
     refreshing: bool,
     refresh_again: bool,
     fetching_status: HashSet<String>,
+    /// Why the last `colima status` failed, until one succeeds.
+    status_errors: HashMap<String, SharedString>,
+    /// Profiles whose in-flight `colima status` started before a change; fetched again.
+    refetch_status: HashSet<String>,
     /// The profiles marked "Start when Colima GPUI opens" were started (once per launch,
     /// after the first successful `colima list`).
     started_on_open: bool,
@@ -133,6 +137,8 @@ impl ProfileStore {
             refreshing: false,
             refresh_again: false,
             fetching_status: HashSet::new(),
+            status_errors: HashMap::new(),
+            refetch_status: HashSet::new(),
             started_on_open: false,
             _poll: poll,
         }
@@ -163,6 +169,22 @@ impl ProfileStore {
 
     pub fn status(&self, profile: &str) -> Option<&Status> {
         self.statuses.get(profile)
+    }
+
+    pub fn status_error(&self, profile: &str) -> Option<&SharedString> {
+        self.status_errors.get(profile)
+    }
+
+    /// Reads `colima status` again, for changes `colima list` doesn't show
+    /// (Kubernetes started or stopped on a running profile).
+    pub fn refresh_status(&mut self, profile: &str, cx: &mut Context<Self>) {
+        self.statuses.remove(profile);
+        if self.fetching_status.contains(profile) {
+            self.refetch_status.insert(profile.to_owned());
+        } else {
+            self.fetch_status(profile, cx);
+        }
+        cx.notify();
     }
 
     pub fn busy(&self, profile: &str) -> Option<Op> {
@@ -400,6 +422,8 @@ impl ProfileStore {
             .collect();
         self.statuses
             .retain(|name, _| running.contains(name.as_str()));
+        self.status_errors
+            .retain(|name, _| running.contains(name.as_str()));
 
         let exists = |name: &String| self.instances.iter().any(|i| &i.name == name);
         let selection_valid = match &self.selection {
@@ -441,10 +465,20 @@ impl ProfileStore {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.fetching_status.remove(&name);
-                if let Ok(status) = result {
-                    this.statuses.insert(name, status);
-                    cx.notify();
+                if this.refetch_status.remove(&name) {
+                    return this.fetch_status(&name, cx);
                 }
+                match result {
+                    Ok(status) => {
+                        this.status_errors.remove(&name);
+                        this.statuses.insert(name, status);
+                    }
+                    Err(error) => {
+                        this.status_errors
+                            .insert(name, crate::colima::cli::describe(&error).into());
+                    }
+                }
+                cx.notify();
             })
             .ok();
         })

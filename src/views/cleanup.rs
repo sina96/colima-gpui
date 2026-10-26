@@ -6,8 +6,11 @@ use gpui::{
 };
 
 use crate::{
-    colima::{cache, cli, commands},
-    docker::system::{self, Prune, Usage, VmDisk, format_size},
+    colima::{cache, commands},
+    docker::{
+        system::{self, Prune, Usage, VmDisk, format_size},
+        volumes,
+    },
     theme::{ActiveTheme, CHART_BUILD_CACHE, CHART_CONTAINERS, CHART_IMAGES, CHART_VOLUMES},
     ui::{
         Button, ButtonStyle, Icon, IconName, InfoTip, Meter, Segment, StackedBar,
@@ -92,7 +95,7 @@ impl CleanupView {
         let task = cx.background_executor().spawn(async move {
             let usage = system::disk_usage(&socket);
             let disk = profile.map(|profile| commands::vm_disk(&profile));
-            let volumes = unused_volumes(&socket);
+            let volumes = volumes::unused_count(&socket);
             let cache = cache::size();
             (usage, disk, volumes, cache)
         });
@@ -270,26 +273,6 @@ impl CleanupView {
 
 // Docker's summary only exposes total volume count. Query unused volumes separately,
 // so empty unused volumes remain actionable without enabling pruning of in-use ones.
-fn unused_volumes(socket: &str) -> Result<usize, cli::CliError> {
-    let output = cli::run(
-        "docker",
-        &[
-            "--host",
-            socket,
-            "volume",
-            "ls",
-            "--filter",
-            "dangling=true",
-            "--format",
-            "json",
-        ],
-    )?;
-    serde_json::Deserializer::from_slice(&output.stdout)
-        .into_iter::<serde_json::Value>()
-        .try_fold(0, |count, volume| volume.map(|_| count + 1))
-        .map_err(|error| cli::CliError::Parse(error.to_string()))
-}
-
 fn prune_available(prune: Prune, usage: &[Usage], unused_volumes: Option<usize>) -> bool {
     if prune == Prune::Volumes {
         unused_volumes.is_some_and(|count| count > 0)

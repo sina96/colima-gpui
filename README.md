@@ -32,7 +32,9 @@
 ## Features
 
 - **Profiles:**
-  - Create, start, stop, restart, edit and delete Colima profiles: CPU, memory, disk, runtime, VM type, mount type and Kubernetes.
+  - Create, start, stop, restart, edit and delete Colima profiles: CPU, memory, disk, runtime, VM type, mount type, Rosetta, shared folders and Kubernetes.
+  - Most of Colima's other options, with the rarely used ones behind **More options**: hostname, DNS, network mode, port forwarder, Kubernetes version and k3s arguments, environment variables, SSH agent and more. **Open colima.yaml** covers anything else.
+  - Start, stop and reset Kubernetes without restarting the profile.
   - Live status and start-up logs.
 - **Overview:**
   - CPU, memory and disk usage per profile.
@@ -43,8 +45,8 @@
   - Live logs you can follow or pause, select, copy and save to a file.
 - **Images and volumes:** browse with sizes and filters. Image details include layers and history, and you can jump between linked containers, images and volumes.
 - **Cleanup:**
-  - See what's using disk space and prune unused data.
-  - Return the freed space from the VM to macOS.
+  - See what's using disk space and prune unused data, including Colima's download cache.
+  - Return the freed space from the VM to your computer.
 - **AI:** download Colima's agent skill and copy a ready-made prompt for coding agents, tailored to the selected profile.
 - **Menu bar and Dock:**
   - Optionally keep running in the menu bar, with start/stop for each profile.

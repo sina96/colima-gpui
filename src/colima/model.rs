@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 /// One line of `colima list --json` (newline-delimited JSON, one object per profile).
@@ -112,7 +114,7 @@ pub struct StartOptions {
     pub mounts: Option<Vec<Mount>>,
     pub mount_inotify: bool,
     pub hostname: String,
-    pub env: std::collections::BTreeMap<String, String>,
+    pub env: BTreeMap<String, String>,
     pub ssh_agent: bool,
     pub root_disk_gib: u32,
     pub cpu_type: String,
@@ -219,11 +221,7 @@ impl StartOptions {
                     if mount.writable {
                         value.push_str(":w");
                     }
-                    // Cobra's StringSlice flag parses CSV, even with repeated flags.
-                    if value.contains([',', '"']) {
-                        value = format!("\"{}\"", value.replace('"', "\"\""));
-                    }
-                    args.extend(["--mount".into(), value]);
+                    args.extend(["--mount".into(), csv_value(&value)]);
                 }
             }
         }
@@ -325,7 +323,7 @@ impl StartOptions {
             if !nested {
                 section = key;
             }
-            let value = raw.split(" #").next().unwrap_or(raw).trim();
+            let value = strip_comment(raw);
             let value = if value.len() >= 2
                 && ((value.starts_with('"') && value.ends_with('"'))
                     || (value.starts_with('\'') && value.ends_with('\'')))
@@ -402,12 +400,17 @@ fn csv_value(value: &str) -> String {
     }
 }
 
+/// The value before a YAML ` #` comment, trimmed.
+fn strip_comment(raw: &str) -> &str {
+    raw.split(" #").next().unwrap_or(raw).trim()
+}
+
 fn optional_scalar(raw: &str) -> Result<String, super::CliError> {
-    let value = raw.split(" #").next().unwrap_or(raw).trim();
+    let value = strip_comment(raw);
     if matches!(value, "" | "null" | "~") {
         Ok(String::new())
     } else {
-        mount_scalar(raw)
+        yaml_scalar(raw)
     }
 }
 
@@ -432,7 +435,7 @@ fn parse_advanced_collections(
             if indent >= level
                 && let Some(raw) = trimmed.strip_prefix("- ")
             {
-                let value = mount_scalar(raw)?;
+                let value = yaml_scalar(raw)?;
                 if value.chars().any(char::is_control) {
                     return Err(error());
                 }
@@ -451,7 +454,7 @@ fn parse_advanced_collections(
             section = key;
             env_indent = None;
             if key == "env" {
-                let raw = raw.split(" #").next().unwrap_or(raw).trim();
+                let raw = strip_comment(raw);
                 if !matches!(raw, "" | "{}" | "null" | "~") {
                     return Err(error());
                 }
@@ -461,7 +464,7 @@ fn parse_advanced_collections(
                 return Err(error());
             }
             let (key, raw) = trimmed.split_once(':').ok_or_else(error)?;
-            let key = mount_scalar(key)?;
+            let key = yaml_scalar(key)?;
             let value = optional_scalar(raw)?;
             if key.chars().any(char::is_control)
                 || value.chars().any(char::is_control)
@@ -475,7 +478,7 @@ fn parse_advanced_collections(
             && let Some(raw) = trimmed.strip_prefix("k3sArgs:")
         {
             options.k3s_args.clear();
-            let raw = raw.split(" #").next().unwrap_or(raw).trim();
+            let raw = strip_comment(raw);
             match raw {
                 "" => list_indent = Some(indent),
                 "[]" | "null" | "~" => {}
@@ -508,7 +511,7 @@ fn parse_dns(text: &str) -> Result<Vec<String>, super::CliError> {
         }
         if let Some(level) = dns_indent {
             if trimmed.starts_with("- ") && indent >= level {
-                let value = mount_scalar(&trimmed[2..])?;
+                let value = yaml_scalar(&trimmed[2..])?;
                 value.parse::<std::net::IpAddr>().map_err(|_| error())?;
                 servers.push(value);
                 continue;
@@ -519,13 +522,13 @@ fn parse_dns(text: &str) -> Result<Vec<String>, super::CliError> {
             dns_indent = None;
         }
         if let Some(raw) = trimmed.strip_prefix("dns:") {
-            let raw = raw.split(" #").next().unwrap_or(raw).trim();
+            let raw = strip_comment(raw);
             match raw {
                 "" => dns_indent = Some(indent),
                 "[]" | "null" | "~" => {}
                 value if value.starts_with('[') && value.ends_with(']') => {
                     for raw in value[1..value.len() - 1].split(',') {
-                        let value = mount_scalar(raw)?;
+                        let value = yaml_scalar(raw)?;
                         value.parse::<std::net::IpAddr>().map_err(|_| error())?;
                         servers.push(value);
                     }
@@ -549,7 +552,7 @@ fn parse_mounts(text: &str) -> Result<Option<Vec<Mount>>, super::CliError> {
         }
         if !line.starts_with(char::is_whitespace) && !trimmed.starts_with('-') {
             if let Some(raw) = trimmed.strip_prefix("mounts:") {
-                let value = raw.split(" #").next().unwrap_or(raw).trim();
+                let value = strip_comment(raw);
                 match value {
                     "[]" => return Ok(Some(Vec::new())),
                     "null" | "~" => return Ok(None),
@@ -577,7 +580,7 @@ fn parse_mounts(text: &str) -> Result<Option<Vec<Mount>>, super::CliError> {
         };
         let mount = mounts.last_mut().ok_or_else(error)?;
         let (key, raw) = field.split_once(':').ok_or_else(error)?;
-        let value = mount_scalar(raw)?;
+        let value = yaml_scalar(raw)?;
         match key.trim() {
             "location" => mount.location = value,
             "writable" => mount.writable = value.parse().map_err(|_| error())?,
@@ -595,9 +598,10 @@ fn parse_mounts(text: &str) -> Result<Option<Vec<Mount>>, super::CliError> {
     }
 }
 
-fn mount_scalar(raw: &str) -> Result<String, super::CliError> {
+/// One YAML scalar: plain, single- or double-quoted, with an optional trailing comment.
+fn yaml_scalar(raw: &str) -> Result<String, super::CliError> {
     let raw = raw.trim();
-    let error = || super::CliError::Parse("unsupported mount value".into());
+    let error = || super::CliError::Parse("unsupported YAML value".into());
     if raw.starts_with('"') || raw.starts_with('\'') {
         let quote = raw.chars().next().unwrap();
         // Find a closing quote followed only by whitespace or a YAML comment.
@@ -618,7 +622,7 @@ fn mount_scalar(raw: &str) -> Result<String, super::CliError> {
         }
         return Err(error());
     }
-    let value = raw.split(" #").next().unwrap_or(raw).trim();
+    let value = strip_comment(raw);
     if value.is_empty() || value.starts_with(['[', '{', '&', '*', '!', '|', '>']) {
         return Err(error());
     }

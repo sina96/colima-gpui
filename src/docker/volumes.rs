@@ -210,6 +210,25 @@ pub fn remove(socket: &str, name: &str) -> Result<String, CliError> {
     output(socket, &["volume", "rm", "--", name])
 }
 
+/// Unused volumes, counted even when they are empty (0 B to reclaim).
+pub fn unused_count(socket: &str) -> Result<usize, CliError> {
+    let listed = output(
+        socket,
+        &[
+            "volume",
+            "ls",
+            "--filter",
+            "dangling=true",
+            "--format",
+            "json",
+        ],
+    )?;
+    Ok(listed
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count())
+}
+
 pub fn prune(socket: &str) -> Result<String, CliError> {
     output(socket, &["volume", "prune", "--all", "--force"])
 }

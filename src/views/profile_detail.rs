@@ -154,9 +154,6 @@ pub struct ProfileDetail {
     kubernetes_confirm: Option<(Entity<ConfirmDialog>, Subscription)>,
     kubernetes_busy: std::collections::HashMap<String, KubernetesOp>,
     kubernetes_errors: std::collections::HashMap<String, String>,
-    kubernetes_status: std::collections::HashMap<String, Result<bool, String>>,
-    kubernetes_fetching: std::collections::HashSet<String>,
-    kubernetes_generation: u64,
     /// Form for `Selection::NewProfile` / `EditProfile`, rebuilt when the selection changes.
     form: Option<(Selection, Entity<ProfileForm>, Subscription)>,
     tab: ProfileTab,
@@ -183,18 +180,6 @@ impl ProfileDetail {
             if !keep_usage {
                 this.usage = None;
             }
-            let running: Vec<_> = store
-                .instances()
-                .iter()
-                .filter(|i| i.is_running())
-                .map(|i| i.name.clone())
-                .collect();
-            this.kubernetes_status
-                .retain(|name, _| running.contains(name));
-            if let Some(instance) = store.selected_instance().filter(|i| i.is_running()) {
-                let profile = instance.name.clone();
-                this.refresh_kubernetes_status(profile, cx);
-            }
             cx.notify();
         });
         Self {
@@ -203,9 +188,6 @@ impl ProfileDetail {
             kubernetes_confirm: None,
             kubernetes_busy: Default::default(),
             kubernetes_errors: Default::default(),
-            kubernetes_status: Default::default(),
-            kubernetes_fetching: Default::default(),
-            kubernetes_generation: 0,
             form: None,
             tab: ProfileTab::Overview,
             tab_profile: None,
@@ -394,7 +376,6 @@ impl ProfileDetail {
             return;
         }
         self.kubernetes_busy.insert(profile.clone(), op);
-        self.kubernetes_generation += 1;
         self.kubernetes_errors.remove(&profile);
         let name = profile.clone();
         let task = cx
@@ -404,51 +385,20 @@ impl ProfileDetail {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.kubernetes_busy.remove(&profile);
-                this.kubernetes_status.remove(&profile);
                 if let Err(error) = result {
                     this.kubernetes_errors
                         .insert(profile.clone(), crate::colima::cli::describe(&error));
                 }
-                this.refresh_kubernetes_status(profile, cx);
-                this.store.update(cx, |store, cx| store.refresh(cx));
+                this.store.update(cx, |store, cx| {
+                    store.refresh_status(&profile, cx);
+                    store.refresh(cx);
+                });
                 cx.notify();
             })
             .ok();
         })
         .detach();
         cx.notify();
-    }
-
-    fn refresh_kubernetes_status(&mut self, profile: String, cx: &mut Context<Self>) {
-        if self.kubernetes_busy.contains_key(&profile)
-            || !self.kubernetes_fetching.insert(profile.clone())
-        {
-            return;
-        }
-        let name = profile.clone();
-        let generation = self.kubernetes_generation;
-        let task = cx.background_executor().spawn(async move {
-            commands::status(&name)
-                .map(|status| status.kubernetes)
-                .map_err(|error| crate::colima::cli::describe(&error))
-        });
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            this.update(cx, |this, cx| {
-                this.kubernetes_fetching.remove(&profile);
-                // A poll started before an action must not overwrite its state.
-                if generation == this.kubernetes_generation
-                    && !this.kubernetes_busy.contains_key(&profile)
-                {
-                    this.kubernetes_status.insert(profile, result);
-                } else if !this.kubernetes_busy.contains_key(&profile) {
-                    this.refresh_kubernetes_status(profile, cx);
-                }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
     }
 
     fn confirm_kubernetes_reset(
@@ -578,14 +528,12 @@ impl ProfileDetail {
     }
 
     fn render_profile(&mut self, inst: &Instance, cx: &mut Context<Self>) -> AnyElement {
-        if inst.is_running() && !self.kubernetes_status.contains_key(&inst.name) {
-            self.refresh_kubernetes_status(inst.name.clone(), cx);
-        }
         let theme = cx.theme().clone();
         let store = self.store.read(cx);
         let busy = store.busy(&inst.name);
         let error = store.error(&inst.name).cloned();
         let status = store.status(&inst.name).cloned();
+        let status_error = store.status_error(&inst.name).cloned();
         let running = inst.is_running();
         let kubernetes_busy = self.kubernetes_busy.get(&inst.name).copied();
         let any_busy = busy.is_some() || kubernetes_busy.is_some();
@@ -770,15 +718,19 @@ impl ProfileDetail {
         };
         let docker = overview_card(&theme, "Docker", IconName::Layers, docker_body);
         // `colima list` reports saved configuration, not the live k3s service.
-        let kubernetes_status = self.kubernetes_status.get(&name);
-        let kubernetes_on = matches!(kubernetes_status, Some(Ok(true)));
-        let kubernetes_known = matches!(kubernetes_status, Some(Ok(_)));
+        let kubernetes_on = status.as_ref().is_some_and(|s| s.kubernetes);
+        let kubernetes_known = status.is_some();
         let kubernetes = if running {
-            match kubernetes_status {
-                Some(Ok(true)) => "On",
-                Some(Ok(false)) => "Off",
-                Some(Err(_)) => "Unavailable",
-                None => "Loading…",
+            match (&status, &status_error) {
+                (Some(status), _) => {
+                    if status.kubernetes {
+                        "On"
+                    } else {
+                        "Off"
+                    }
+                }
+                (None, Some(_)) => "Unavailable",
+                (None, None) => "Loading…",
             }
         } else {
             missing_status
@@ -873,9 +825,7 @@ impl ProfileDetail {
                     )
                 })
                 .when_some(
-                    kubernetes_status
-                        .and_then(|status| status.as_ref().err())
-                        .cloned(),
+                    status_error.filter(|_| running && status.is_none()),
                     |el, error| {
                         el.child(
                             ErrorNote::new(
