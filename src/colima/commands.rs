@@ -63,6 +63,37 @@ pub fn stop(profile: &str) -> Result<(), CliError> {
     stop_with_force(profile, false)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KubernetesOp {
+    Start,
+    Stop,
+    Reset,
+}
+
+impl KubernetesOp {
+    fn subcommand(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Reset => "reset",
+        }
+    }
+
+    pub fn progress_label(self) -> &'static str {
+        match self {
+            Self::Start => "Starting Kubernetes…",
+            Self::Stop => "Stopping Kubernetes…",
+            Self::Reset => "Resetting Kubernetes…",
+        }
+    }
+}
+
+/// Changes only Kubernetes, leaving the running VM alone. Colima 0.10.3's reset
+/// runs without a prompt and has no force/yes flag; the UI confirms it first.
+pub fn kubernetes(profile: &str, op: KubernetesOp) -> Result<(), CliError> {
+    cli::run(COLIMA, &["kubernetes", op.subcommand(), "-p", profile]).map(drop)
+}
+
 pub fn parse_list(stdout: &str) -> Result<Vec<Instance>, CliError> {
     stdout
         .lines()
