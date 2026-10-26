@@ -1503,6 +1503,14 @@ pub fn validate_options(options: &StartOptions, host_arch: &str) -> Result<(), S
     {
         return Err("Give each k3s argument a value, or remove its row.".into());
     }
+    // The characters `StartOptions::parse_config` accepts, so Edit can read it back.
+    if !options
+        .kubernetes_version
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"-_.+".contains(&b))
+    {
+        return Err("Use a k3s version such as v1.35.0+k3s1, or leave it empty.".into());
+    }
     if options.cpu_type.chars().any(char::is_control) {
         return Err("CPU type cannot contain control characters.".into());
     }
@@ -1598,6 +1606,15 @@ mod tests {
         options.k3s_args = vec!["".into()];
         assert!(validate_options(&options, "aarch64").is_err());
         options.k3s_args.clear();
+        for version in ["", "v1.35.0+k3s1"] {
+            options.kubernetes_version = version.into();
+            assert!(validate_options(&options, "aarch64").is_ok(), "{version}");
+        }
+        for version in ["v1.35 0", "v1.35;rm", "v1/35"] {
+            options.kubernetes_version = version.into();
+            assert!(validate_options(&options, "aarch64").is_err(), "{version}");
+        }
+        options.kubernetes_version.clear();
         options.root_disk_gib = 0;
         assert!(validate_options(&options, "aarch64").is_err());
     }

@@ -349,7 +349,8 @@ impl CleanupView {
                     format!("~{}", format_size(estimate)),
                     prune.description().to_owned(),
                     prune_available(prune, &self.usage, self.unused_volumes)
-                        && self.list_error.is_none()
+                        // Volumes are counted separately, so they don't need the usage estimate.
+                        && (prune == Prune::Volumes || self.list_error.is_none())
                         && (prune != Prune::Everything || self.profile.is_some()),
                 )
             }
