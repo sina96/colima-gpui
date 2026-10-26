@@ -141,12 +141,16 @@ impl StartOptions {
     }
 
     pub fn read_config(profile: &str) -> Result<Self, super::CliError> {
-        let home = std::env::var_os("HOME")
+        let home = super::paths::colima_home()
             .ok_or_else(|| super::CliError::Parse("HOME is not set".into()))?;
-        Self::read_config_at(std::path::Path::new(&home), profile)
+        Self::read_config_at(&home, profile)
     }
 
-    pub fn read_config_at(home: &std::path::Path, profile: &str) -> Result<Self, super::CliError> {
+    /// `colima_home` is Colima's config directory (see [`super::paths::colima_home`]).
+    pub fn read_config_at(
+        colima_home: &std::path::Path,
+        profile: &str,
+    ) -> Result<Self, super::CliError> {
         if profile.is_empty()
             || !profile
                 .bytes()
@@ -154,7 +158,7 @@ impl StartOptions {
         {
             return Err(super::CliError::Parse("invalid profile name".into()));
         }
-        let path = home.join(".colima").join(profile).join("colima.yaml");
+        let path = colima_home.join(profile).join("colima.yaml");
         let text = std::fs::read_to_string(&path).map_err(|source| super::CliError::Spawn {
             program: path.display().to_string(),
             source,

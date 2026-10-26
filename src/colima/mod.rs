@@ -3,6 +3,7 @@
 pub mod cli;
 pub mod commands;
 pub mod model;
+pub mod paths;
 
 pub use cli::CliError;
 pub use model::{Instance, Status};

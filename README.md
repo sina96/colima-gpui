@@ -18,11 +18,12 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
-<!-- Screenshot: add docs/screenshots/overview.png, then uncomment.
-<p align="center">
-  <img src="docs/screenshots/overview.png" width="720" alt="The Overview tab of a running profile">
-</p>
--->
+<table align="center">
+  <tr>
+    <td width="50%"><a href="docs/screenshots/overview.png"><img src="docs/screenshots/overview.png" width="100%" alt="The Overview tab of a running profile: resources, VM details, Docker context and socket, and quick actions"></a></td>
+    <td width="50%"><a href="docs/screenshots/cleanup.png"><img src="docs/screenshots/cleanup.png" width="100%" alt="The Cleanup tab: disk usage by images, containers, volumes and build cache, the VM data disk, and prune actions"></a></td>
+  </tr>
+</table>
 
 > **Status:** early and under active development. Available for macOS and Linux. [Download it](#install) or [build it from source](#build-from-source).
 >
