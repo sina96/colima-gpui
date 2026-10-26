@@ -3,6 +3,8 @@
 //! Create mode exposes every option. Edit mode only offers what colima can change
 //! on an existing VM (CPUs, memory, growing the disk, mounts, Kubernetes, network address);
 //! runtime, VM type, architecture and mount type are fixed after creation.
+//! Hostname, root disk and CPU type are also kept read-only in Edit until their
+//! effective changes on an existing VM have been verified.
 
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString,
@@ -63,6 +65,12 @@ struct MountRow {
     _subscription: Subscription,
 }
 
+struct OptionRow {
+    id: usize,
+    input: Entity<TextInput>,
+    _subscription: Subscription,
+}
+
 pub struct ProfileForm {
     mode: FormMode,
     /// Settings the form started from; edit mode compares against it.
@@ -87,6 +95,18 @@ pub struct ProfileForm {
     dns: Entity<TextInput>,
     network_mode: Entity<Select<&'static str>>,
     network_interface: Entity<TextInput>,
+    mount_inotify: bool,
+    hostname: Entity<TextInput>,
+    env: Vec<OptionRow>,
+    k3s_args: Vec<OptionRow>,
+    next_option_id: usize,
+    ssh_agent: bool,
+    root_disk: Entity<Stepper>,
+    cpu_type: Entity<TextInput>,
+    nested_virtualization: bool,
+    nested_supported: bool,
+    port_forwarder: Entity<Select<&'static str>>,
+    editor_error: Option<String>,
     activate: bool,
     load_warning: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
@@ -110,7 +130,7 @@ impl ProfileForm {
                 StartOptions::default(),
                 Some(
                     format!(
-                        "Couldn't read colima.yaml ({e}); showing defaults for the other settings."
+                        "Couldn't read colima.yaml ({e}). Open the file to fix it, then reopen Edit."
                     )
                     .into(),
                 ),
@@ -137,7 +157,7 @@ impl ProfileForm {
 
     fn build(
         mode: FormMode,
-        initial: StartOptions,
+        mut initial: StartOptions,
         load_warning: Option<SharedString>,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -200,6 +220,42 @@ impl ProfileForm {
             input
         });
 
+        let hostname = text_input(&initial.hostname, "Colima default", cx);
+        let cpu_type = text_input(&initial.cpu_type, "QEMU default (e.g. host, max)", cx);
+        let root_disk = cx.new(|cx| {
+            Stepper::new(
+                initial.root_disk_gib as i32,
+                1,
+                MAX_DISK_GIB.max(initial.root_disk_gib as i32),
+                1,
+                cx,
+            )
+            .unit("GiB")
+        });
+        // Preserve CLI-created 'none' even though the form offers ssh and grpc.
+        let port_forwarder = select(
+            if initial.port_forwarder == "none" {
+                &["ssh", "grpc", "none"]
+            } else {
+                &["ssh", "grpc"]
+            },
+            &initial.port_forwarder,
+            cx,
+        );
+        let env: Vec<_> = initial
+            .env
+            .iter()
+            .enumerate()
+            .map(|(id, (key, value))| option_row(id, &format!("{key}={value}"), "KEY=value", cx))
+            .collect();
+        let k3s_args: Vec<_> = initial
+            .k3s_args
+            .iter()
+            .enumerate()
+            .map(|(id, value)| option_row(env.len() + id, value, "--disable=traefik", cx))
+            .collect();
+        let next_option_id = env.len() + k3s_args.len();
+
         let mounts: Vec<_> = initial
             .mounts
             .as_deref()
@@ -241,7 +297,7 @@ impl ProfileForm {
             ),
         ];
 
-        for input in [&dns, &network_interface] {
+        for input in [&dns, &network_interface, &hostname, &cpu_type] {
             subscriptions.push(cx.subscribe(
                 input,
                 |this, _, event: &TextInputEvent, cx| match event {
@@ -255,7 +311,41 @@ impl ProfileForm {
             |_, _, _: &SelectChanged<&'static str>, cx| cx.notify(),
         ));
 
+        subscriptions.push(cx.subscribe(&root_disk, |_, _, _: &StepperChanged, cx| cx.notify()));
+        subscriptions.push(cx.subscribe(
+            &port_forwarder,
+            |_, _, _: &SelectChanged<&'static str>, cx| cx.notify(),
+        ));
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            let task = cx
+                .background_executor()
+                .spawn(async { nested_virtualization_supported() });
+            cx.spawn(async move |this, cx| {
+                let supported = task.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.nested_supported = supported;
+                    this.initial.nested_virtualization =
+                        supported.then_some(this.nested_virtualization);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        let nested_virtualization = initial.nested_virtualization.unwrap_or(false);
+        initial.nested_virtualization = None;
         Self {
+            mount_inotify: initial.mount_inotify,
+            hostname,
+            env,
+            k3s_args,
+            next_option_id,
+            ssh_agent: initial.ssh_agent,
+            root_disk,
+            cpu_type,
+            nested_virtualization,
+            nested_supported: false,
+            port_forwarder,
+            editor_error: None,
             mode,
             dns,
             network_mode,
@@ -325,8 +415,147 @@ impl ProfileForm {
                 self.initial.network_mode.clone()
             },
             network_interface: self.network_interface.read(cx).text().trim().to_owned(),
+            mount_inotify: self.mount_inotify,
+            hostname: if matches!(self.mode, FormMode::Create { .. }) {
+                self.hostname.read(cx).text().trim().to_owned()
+            } else {
+                self.initial.hostname.clone()
+            },
+            env: self
+                .env
+                .iter()
+                .filter_map(|row| row.input.read(cx).text().split_once('='))
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect(),
+            k3s_args: self
+                .k3s_args
+                .iter()
+                .map(|row| row.input.read(cx).text().to_owned())
+                .collect(),
+            ssh_agent: self.ssh_agent,
+            // The root disk is separate from the resizable runtime data disk.
+            root_disk_gib: if matches!(self.mode, FormMode::Create { .. }) {
+                self.root_disk.read(cx).value() as u32
+            } else {
+                self.initial.root_disk_gib
+            },
+            cpu_type: if matches!(self.mode, FormMode::Create { .. }) {
+                self.cpu_type.read(cx).text().trim().to_owned()
+            } else {
+                self.initial.cpu_type.clone()
+            },
+            nested_virtualization: self.nested_supported.then_some(self.nested_virtualization),
+            port_forwarder: value(&self.port_forwarder),
             activate: self.activate,
         }
+    }
+
+    fn render_option_list(&self, environment: bool, cx: &mut Context<Self>) -> AnyElement {
+        let rows = if environment {
+            &self.env
+        } else {
+            &self.k3s_args
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .py_2()
+            .children(rows.iter().map(|row| {
+                let id = row.id;
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(div().flex_1().min_w_0().child(row.input.clone()))
+                    .child(
+                        Button::new(("remove-option", id), "Remove").on_click(cx.listener(
+                            move |this, _, _, cx| {
+                                let rows = if environment {
+                                    &mut this.env
+                                } else {
+                                    &mut this.k3s_args
+                                };
+                                rows.retain(|row| row.id != id);
+                                cx.notify();
+                            },
+                        )),
+                    )
+            }))
+            .child(div().flex().child(
+                Button::new(if environment { "add-env" } else { "add-k3s" }, "Add").on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        let row = option_row(
+                            this.next_option_id,
+                            "",
+                            if environment {
+                                "KEY=value"
+                            } else {
+                                "--disable=traefik"
+                            },
+                            cx,
+                        );
+                        this.next_option_id += 1;
+                        window.focus(&row.input.focus_handle(cx), cx);
+                        if environment {
+                            this.env.push(row);
+                        } else {
+                            this.k3s_args.push(row);
+                        }
+                        cx.notify();
+                    }),
+                ),
+            ))
+            .into_any_element()
+    }
+
+    fn open_config(&mut self, cx: &mut Context<Self>) {
+        let FormMode::Edit { profile, .. } = &self.mode else {
+            return;
+        };
+        if !crate::docker::system::valid_profile(profile) {
+            return;
+        }
+        let Some(home) = crate::colima::paths::colima_home() else {
+            self.editor_error = Some("HOME is not set.".into());
+            cx.notify();
+            return;
+        };
+        let path = home.join(profile).join("colima.yaml");
+        self.editor_error = None;
+        let task = cx.background_executor().spawn(async move {
+            // Opening the editor is deliberately independent of the CLI runner.
+            let mut command = std::process::Command::new(if cfg!(target_os = "macos") {
+                "open"
+            } else {
+                "xdg-open"
+            });
+            if cfg!(target_os = "macos") {
+                command.arg("-t");
+            }
+            let status = command
+                .arg(path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map_err(|error| format!("Couldn't open colima.yaml: {error}"))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Couldn't open colima.yaml: editor launcher exited with {status}"
+                ))
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.editor_error = result.err();
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn profile_name(&self, cx: &App) -> String {
@@ -338,7 +567,26 @@ impl ProfileForm {
 
     /// The first problem blocking submit, if any.
     fn problem(&self, cx: &App) -> Option<String> {
+        // Defaults from an unreadable/unsupported config must never overwrite it.
+        if self.load_warning.is_some() {
+            return Some("Fix colima.yaml and reopen Edit before saving.".into());
+        }
         let options = self.options(cx);
+        let mut keys = std::collections::BTreeSet::new();
+        for row in &self.env {
+            let Some((key, _)) = row.input.read(cx).text().split_once('=') else {
+                return Some("Environment variables need KEY=value, one per row.".into());
+            };
+            if !keys.insert(key) {
+                return Some("Environment variable names must be unique.".into());
+            }
+        }
+        if options.env.is_empty() && !self.initial.env.is_empty() {
+            return Some(
+                "To remove every environment variable, clear env in colima.yaml and reopen Edit."
+                    .into(),
+            );
+        }
         match &self.mode {
             FormMode::Create { existing } => validate_name(&self.profile_name(cx), existing)
                 .err()
@@ -660,7 +908,11 @@ impl Render for ProfileForm {
                         el.child(
                             div().flex().flex_col().gap_3()
                                 .child(advanced_heading("Mounts", cx))
+                                .child(advanced_row("Inotify events", self.render_toggle("mount-inotify", self.mount_inotify,
+                                    |this| this.mount_inotify = !this.mount_inotify, cx), cx))
                                 .child(advanced_heading("Network", cx))
+                                .child(advanced_row("Hostname", if creating { self.hostname.clone().into_any_element() } else { fixed(if options.hostname.is_empty() { "Colima default" } else { &options.hostname }) }, cx))
+                                .child(advanced_row("Port forwarder", self.port_forwarder.clone().into_any_element(), cx))
                                 .child(advanced_row("DNS servers", if creating { self.dns.clone().into_any_element() } else if options.dns.is_empty() { fixed("Colima default") } else { fixed(&options.dns.join(", ")) }, cx))
                                 .when(cfg!(target_os = "macos"), |el| {
                                     el.child(advanced_row("Mode", if creating { self.network_mode.clone().into_any_element() } else { fixed(&options.network_mode) }, cx))
@@ -679,7 +931,23 @@ impl Render for ProfileForm {
                                             .child(div().flex_1().max_w(px(320.)).child(self.kubernetes_version.clone())),
                                     )
                                 })
-                                .child(advanced_heading("VM", cx)),
+                                .when(self.kubernetes, |el| el.child(advanced_row("k3s arguments", self.render_option_list(false, cx), cx)))
+                                .child(advanced_heading("VM", cx))
+                                .child(advanced_row("Environment variables", self.render_option_list(true, cx), cx))
+                                .child(advanced_row("SSH agent", self.render_toggle("ssh-agent", self.ssh_agent,
+                                    |this| this.ssh_agent = !this.ssh_agent, cx), cx))
+                                .child(advanced_row("Root disk", if creating { self.root_disk.clone().into_any_element() } else { fixed(&format!("{} GiB", options.root_disk_gib)) }, cx))
+                                .when(options.vm_type == "qemu", |el| el.child(advanced_row("CPU type", if creating { self.cpu_type.clone().into_any_element() } else { fixed(if options.cpu_type.is_empty() { "QEMU default" } else { &options.cpu_type }) }, cx)))
+                                .when(options.vm_type == "vz" && self.nested_supported, |el| el.child(advanced_row("Nested virtualization", self.render_toggle("nested-virtualization", self.nested_virtualization,
+                                    |this| this.nested_virtualization = !this.nested_virtualization, cx), cx)))
+                                .when(!creating, |el| el.child(div().text_sm().text_color(theme.text_muted)
+                                    .child("Hostname, root disk and CPU type can be set in the create form.")))
+                                .when(!creating, |el| el.child(div().flex().flex_col().gap_1()
+                                    .child(div().flex().child(Button::new("open-colima-yaml", "Open colima.yaml")
+                                        .on_click(cx.listener(|this, _, _, cx| this.open_config(cx)))))
+                                    .child(div().text_sm().text_color(theme.text_muted)
+                                        .child("Registry mirrors, insecure registries and provision scripts are set here. Changes apply on the next start."))
+                                    .when_some(self.editor_error.clone(), |el, error| el.child(div().text_sm().text_color(theme.error).child(error))))),
                         )
                     })
                     .when_some(problem.filter(|_| !hide_problem), |el, problem| {
@@ -702,6 +970,66 @@ impl Render for ProfileForm {
                     }),
             )
     }
+}
+
+fn text_input(
+    value: &str,
+    placeholder: &'static str,
+    cx: &mut Context<ProfileForm>,
+) -> Entity<TextInput> {
+    cx.new(|cx| {
+        let mut input = TextInput::new(cx).placeholder(placeholder);
+        input.set_text(value.to_owned(), cx);
+        input
+    })
+}
+
+fn option_row(
+    id: usize,
+    value: &str,
+    placeholder: &'static str,
+    cx: &mut Context<ProfileForm>,
+) -> OptionRow {
+    let input = text_input(value, placeholder, cx);
+    let subscription = cx.subscribe(&input, |this, _, event: &TextInputEvent, cx| match event {
+        TextInputEvent::Changed => cx.notify(),
+        TextInputEvent::Submitted => this.submit(cx),
+    });
+    OptionRow {
+        id,
+        input,
+        _subscription: subscription,
+    }
+}
+
+fn nested_virtualization_supported() -> bool {
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return false;
+    }
+    let Ok(chip) = crate::colima::cli::run("/usr/sbin/sysctl", &["-n", "machdep.cpu.brand_string"])
+    else {
+        return false;
+    };
+    let Ok(version) = crate::colima::cli::run("/usr/bin/sw_vers", &["-productVersion"]) else {
+        return false;
+    };
+    supports_nested(
+        &String::from_utf8_lossy(&chip.stdout),
+        &String::from_utf8_lossy(&version.stdout),
+    )
+}
+
+fn supports_nested(chip: &str, version: &str) -> bool {
+    let generation = chip
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix('M')?.parse::<u32>().ok());
+    generation.is_some_and(|n| n >= 3)
+        && version
+            .trim()
+            .split('.')
+            .next()
+            .and_then(|v| v.parse::<u32>().ok())
+            .is_some_and(|v| v >= 15)
 }
 
 fn mount_row(id: usize, mount: &Mount, cx: &mut Context<ProfileForm>) -> MountRow {
@@ -736,7 +1064,19 @@ fn advanced_row(label: &'static str, control: AnyElement, cx: &App) -> impl Into
                 .text_color(cx.theme().text_muted)
                 .child(label),
         )
-        .child(div().flex_1().min_w_0().max_w(px(320.)).child(control))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .max_w(px(
+                    if matches!(label, "Environment variables" | "k3s arguments") {
+                        520.
+                    } else {
+                        320.
+                    },
+                ))
+                .child(control),
+        )
 }
 
 /// Comma-separated addresses; an empty field restores Colima's resolver.
@@ -813,6 +1153,46 @@ pub fn validate_name(name: &str, existing: &[String]) -> Result<(), String> {
 
 /// Combinations colima rejects at start time, caught before submitting.
 pub fn validate_options(options: &StartOptions, host_arch: &str) -> Result<(), String> {
+    if options.root_disk_gib == 0 {
+        return Err("Root disk must be at least 1 GiB.".into());
+    }
+    if !options.hostname.is_empty()
+        && (options.hostname.len() > 253
+            || options.hostname.split('.').any(|label| {
+                label.is_empty()
+                    || label.len() > 63
+                    || label.starts_with('-')
+                    || label.ends_with('-')
+                    || !label
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            }))
+    {
+        return Err("Use a hostname made of letters, digits, dashes and dots.".into());
+    }
+    for (key, value) in &options.env {
+        if key.is_empty()
+            || !key.bytes().enumerate().all(|(index, b)| {
+                b == b'_' || b.is_ascii_alphabetic() || (index > 0 && b.is_ascii_digit())
+            })
+            || value.chars().any(char::is_control)
+        {
+            return Err("Environment names need letters, digits or underscores and cannot start with a digit. Values cannot contain control characters.".into());
+        }
+    }
+    if options
+        .k3s_args
+        .iter()
+        .any(|arg| arg.is_empty() || arg.chars().any(char::is_control))
+    {
+        return Err("Give each k3s argument a value, or remove its row.".into());
+    }
+    if options.cpu_type.chars().any(char::is_control) {
+        return Err("CPU type cannot contain control characters.".into());
+    }
+    if !matches!(options.port_forwarder.as_str(), "ssh" | "grpc" | "none") {
+        return Err("Choose an available port forwarder.".into());
+    }
     if options.arch != host_arch && options.vm_type != "qemu" {
         return Err(format!(
             "Emulating {} needs the qemu VM type.",
@@ -864,6 +1244,47 @@ pub fn validate_options(options: &StartOptions, host_arch: &str) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_virtualization_requires_m3_and_macos_15() {
+        assert!(supports_nested("Apple M3 Pro", "15.0"));
+        assert!(supports_nested("Apple M5 Max", "26.1"));
+        for (chip, version) in [
+            ("Apple M2 Max", "26.0"),
+            ("Apple M3", "14.7"),
+            ("Intel", "26.0"),
+            ("", "15.0"),
+            ("Apple M3", "unknown"),
+        ] {
+            assert!(!supports_nested(chip, version));
+        }
+    }
+
+    #[test]
+    fn advanced_option_validation() {
+        let mut options = crate::colima::model::host_defaults("macos", "aarch64");
+        for hostname in ["", "t65-vm", "t65-vm.example"] {
+            options.hostname = hostname.into();
+            assert!(validate_options(&options, "aarch64").is_ok());
+        }
+        for hostname in ["bad name", "-bad", "bad-", "bad..name", "bad;command"] {
+            options.hostname = hostname.into();
+            assert!(validate_options(&options, "aarch64").is_err());
+        }
+        options.hostname.clear();
+        options
+            .env
+            .insert("T65_VALUE".into(), "comma, equals= and \"quote\"".into());
+        assert!(validate_options(&options, "aarch64").is_ok());
+        options.env.insert("1BAD".into(), "value".into());
+        assert!(validate_options(&options, "aarch64").is_err());
+        options.env.clear();
+        options.k3s_args = vec!["".into()];
+        assert!(validate_options(&options, "aarch64").is_err());
+        options.k3s_args.clear();
+        options.root_disk_gib = 0;
+        assert!(validate_options(&options, "aarch64").is_err());
+    }
 
     #[test]
     fn names() {

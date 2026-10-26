@@ -110,6 +110,16 @@ pub struct StartOptions {
     pub mount_type: String,
     /// None disables mounts; Some(empty) uses Colima's writable home mount.
     pub mounts: Option<Vec<Mount>>,
+    pub mount_inotify: bool,
+    pub hostname: String,
+    pub env: std::collections::BTreeMap<String, String>,
+    pub ssh_agent: bool,
+    pub root_disk_gib: u32,
+    pub cpu_type: String,
+    /// None omits the flag on hosts where Colima does not register it.
+    pub nested_virtualization: Option<bool>,
+    pub port_forwarder: String,
+    pub k3s_args: Vec<String>,
     pub network_address: bool,
     /// Empty uses Colima's DNS resolver.
     pub dns: Vec<String>,
@@ -146,6 +156,15 @@ pub fn host_defaults(os: &str, arch: &str) -> StartOptions {
         rosetta: false,
         mount_type: if linux { "sshfs" } else { "virtiofs" }.into(),
         mounts: Some(Vec::new()),
+        mount_inotify: false,
+        hostname: String::new(),
+        env: Default::default(),
+        ssh_agent: false,
+        root_disk_gib: 20,
+        cpu_type: String::new(),
+        nested_virtualization: None,
+        port_forwarder: "ssh".into(),
+        k3s_args: vec!["--disable=traefik".into()],
         network_address: false,
         dns: Vec::new(),
         network_mode: "shared".into(),
@@ -226,6 +245,38 @@ impl StartOptions {
                 self.network_interface.clone(),
             ]);
         }
+        args.extend([
+            format!("--mount-inotify={}", self.mount_inotify),
+            format!("--ssh-agent={}", self.ssh_agent),
+            "--hostname".into(),
+            self.hostname.clone(),
+            "--root-disk".into(),
+            self.root_disk_gib.to_string(),
+            "--port-forwarder".into(),
+            self.port_forwarder.clone(),
+        ]);
+        if self.vm_type == "qemu" {
+            args.extend(["--cpu-type".into(), self.cpu_type.clone()]);
+        }
+        if let Some(enabled) = self.nested_virtualization {
+            args.push(format!("--nested-virtualization={enabled}"));
+        }
+        for (key, value) in &self.env {
+            let pair = format!("{key}={value}");
+            // pflag strips surrounding quotes when a value has only one '='.
+            // Repeating the same CSV field forces its CSV branch without changing
+            // the resulting map, preserving trailing quotes and embedded commas.
+            let record = csv_value(&pair);
+            let pair = format!("{record},{record}");
+            args.extend(["--env".into(), pair]);
+        }
+        if self.k3s_args.is_empty() {
+            args.extend(["--k3s-arg".into(), String::new()]);
+        } else {
+            for arg in &self.k3s_args {
+                args.extend(["--k3s-arg".into(), csv_value(arg)]);
+            }
+        }
         args
     }
 
@@ -252,7 +303,7 @@ impl StartOptions {
     }
 
     /// Reads the editable subset emitted by Colima, without adding a YAML dependency.
-    /// Unknown sections (provision, env, etc.) are ignored; unsupported
+    /// Unknown sections (provision, docker, etc.) are ignored; unsupported
     /// syntax in an editable field returns an error instead of silently changing it.
     pub fn parse_config(text: &str) -> Result<Self, super::CliError> {
         let mut options = Self {
@@ -260,6 +311,7 @@ impl StartOptions {
             dns: parse_dns(text)?,
             ..Self::default()
         };
+        parse_advanced_collections(text, &mut options)?;
         let mut section = "";
         for line in text.lines() {
             let trimmed = line.trim();
@@ -274,8 +326,9 @@ impl StartOptions {
                 section = key;
             }
             let value = raw.split(" #").next().unwrap_or(raw).trim();
-            let value = if (value.starts_with('"') && value.ends_with('"'))
-                || (value.starts_with('\'') && value.ends_with('\''))
+            let value = if value.len() >= 2
+                && ((value.starts_with('"') && value.ends_with('"'))
+                    || (value.starts_with('\'') && value.ends_with('\'')))
             {
                 &value[1..value.len() - 1]
             } else {
@@ -297,6 +350,15 @@ impl StartOptions {
                 }
             };
             match (nested, section, key) {
+                (false, _, "mountInotify") => options.mount_inotify = boolean()?,
+                (false, _, "forwardAgent") => options.ssh_agent = boolean()?,
+                (false, _, "nestedVirtualization") => {
+                    options.nested_virtualization = Some(boolean()?)
+                }
+                (false, _, "rootDisk") => options.root_disk_gib = number()?,
+                (false, _, "hostname") => options.hostname = optional_scalar(raw)?,
+                (false, _, "cpuType") => options.cpu_type = optional_scalar(raw)?,
+                (false, _, "portForwarder") => options.port_forwarder = string()?,
                 (false, _, "cpu") => options.cpus = number()?,
                 (false, _, "memory") => options.memory_gib = number()?,
                 (false, _, "disk") => options.disk_gib = number()?,
@@ -329,6 +391,99 @@ impl StartOptions {
         }
         Ok(options)
     }
+}
+
+// Cobra StringSlice flags parse each occurrence as a CSV record.
+fn csv_value(value: &str) -> String {
+    if value.contains([',', '"']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
+}
+
+fn optional_scalar(raw: &str) -> Result<String, super::CliError> {
+    let value = raw.split(" #").next().unwrap_or(raw).trim();
+    if matches!(value, "" | "null" | "~") {
+        Ok(String::new())
+    } else {
+        mount_scalar(raw)
+    }
+}
+
+/// Only the block map/list shapes emitted by Colima are supported. Reject other
+/// YAML shapes rather than silently dropping environment variables or k3s args.
+fn parse_advanced_collections(
+    text: &str,
+    options: &mut StartOptions,
+) -> Result<(), super::CliError> {
+    let error =
+        || super::CliError::Parse("unsupported env or kubernetes.k3sArgs configuration".into());
+    let mut section = "";
+    let mut list_indent = None;
+    let mut env_indent = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if let Some(level) = list_indent {
+            if indent >= level
+                && let Some(raw) = trimmed.strip_prefix("- ")
+            {
+                let value = mount_scalar(raw)?;
+                if value.chars().any(char::is_control) {
+                    return Err(error());
+                }
+                options.k3s_args.push(value);
+                continue;
+            }
+            if indent > level {
+                return Err(error());
+            }
+            list_indent = None;
+        }
+        if indent == 0 {
+            let Some((key, raw)) = trimmed.split_once(':') else {
+                continue;
+            };
+            section = key;
+            env_indent = None;
+            if key == "env" {
+                let raw = raw.split(" #").next().unwrap_or(raw).trim();
+                if !matches!(raw, "" | "{}" | "null" | "~") {
+                    return Err(error());
+                }
+            }
+        } else if section == "env" {
+            if *env_indent.get_or_insert(indent) != indent {
+                return Err(error());
+            }
+            let (key, raw) = trimmed.split_once(':').ok_or_else(error)?;
+            let key = mount_scalar(key)?;
+            let value = optional_scalar(raw)?;
+            if key.chars().any(char::is_control)
+                || value.chars().any(char::is_control)
+                || options.env.insert(key, value).is_some()
+            {
+                return Err(error());
+            }
+        }
+        if section == "kubernetes"
+            && indent > 0
+            && let Some(raw) = trimmed.strip_prefix("k3sArgs:")
+        {
+            options.k3s_args.clear();
+            let raw = raw.split(" #").next().unwrap_or(raw).trim();
+            match raw {
+                "" => list_indent = Some(indent),
+                "[]" | "null" | "~" => {}
+                _ => return Err(error()),
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Colima emits DNS as a block IP list (or [] when using its resolver).
@@ -474,6 +629,127 @@ fn mount_scalar(raw: &str) -> Result<String, super::CliError> {
 mod tests {
     use super::*;
     #[test]
+    fn advanced_config_and_csv_flags() {
+        let fixture = include_str!("../../tests/fixtures/colima_config.yaml");
+        let config = format!(
+            "{fixture}\n{}",
+            r#"mountInotify: true
+hostname: t65-vm.example
+forwardAgent: true
+rootDisk: 30
+cpuType: cortex-a72
+nestedVirtualization: true
+portForwarder: grpc
+env:
+  SIMPLE: value
+  QUOTED: 'comma, equals= and "quote"'
+  EMPTY: ""
+  TRAILING: 'value"'
+"#
+        )
+        .replace(
+            "  enabled: true",
+            r#"  enabled: true
+  k3sArgs:
+    - --disable=traefik,servicelb
+    - '--node-label=example=hello world'"#,
+        );
+        let options = StartOptions::parse_config(&config).unwrap();
+        assert!(options.mount_inotify && options.ssh_agent);
+        assert_eq!(options.hostname, "t65-vm.example");
+        assert_eq!(options.root_disk_gib, 30);
+        assert_eq!(options.cpu_type, "cortex-a72");
+        assert_eq!(options.nested_virtualization, Some(true));
+        assert_eq!(options.port_forwarder, "grpc");
+        assert_eq!(options.env["EMPTY"], "");
+        assert_eq!(options.env["QUOTED"], "comma, equals= and \"quote\"");
+        assert_eq!(
+            options.k3s_args,
+            [
+                "--disable=traefik,servicelb",
+                "--node-label=example=hello world"
+            ]
+        );
+        let args = options.to_args();
+        assert!(args.contains(&"--nested-virtualization=true".into()));
+        assert!(args.contains(&"--mount-inotify=true".into()));
+        assert!(args.contains(&"--ssh-agent=true".into()));
+        for (flag, value) in [
+            ("--hostname", "t65-vm.example"),
+            ("--root-disk", "30"),
+            ("--cpu-type", "cortex-a72"),
+            ("--port-forwarder", "grpc"),
+        ] {
+            assert!(args.windows(2).any(|pair| pair == [flag, value]));
+        }
+        let env: Vec<_> = args
+            .windows(2)
+            .filter(|p| p[0] == "--env")
+            .map(|p| p[1].as_str())
+            .collect();
+        assert_eq!(
+            env,
+            [
+                "EMPTY=,EMPTY=",
+                "\"QUOTED=comma, equals= and \"\"quote\"\"\",\"QUOTED=comma, equals= and \"\"quote\"\"\"",
+                "SIMPLE=value,SIMPLE=value",
+                "\"TRAILING=value\"\"\",\"TRAILING=value\"\"\""
+            ]
+        );
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--k3s-arg", "\"--disable=traefik,servicelb\""])
+        );
+        let cleared = StartOptions::parse_config(
+            "env: {}\nkubernetes:\n  k3sArgs: []\nhostname: \"\"\ncpuType: \"\"",
+        )
+        .unwrap();
+        assert!(cleared.env.is_empty() && cleared.k3s_args.is_empty());
+        assert!(cleared.to_args().windows(2).any(|p| p == ["--k3s-arg", ""]));
+        assert!(
+            !StartOptions::default()
+                .to_args()
+                .iter()
+                .any(|a| a.starts_with("--nested-virtualization"))
+        );
+        let mut disabled = options.clone();
+        disabled.nested_virtualization = Some(false);
+        disabled.mount_inotify = false;
+        disabled.ssh_agent = false;
+        for flag in [
+            "--nested-virtualization=false",
+            "--mount-inotify=false",
+            "--ssh-agent=false",
+        ] {
+            assert!(disabled.to_args().contains(&flag.into()));
+        }
+        let mut vz = options;
+        vz.vm_type = "vz".into();
+        assert!(!vz.to_args().contains(&"--cpu-type".into()));
+    }
+
+    #[test]
+    fn rejects_unsupported_advanced_yaml_without_losing_values() {
+        for config in [
+            "mountInotify: yes",
+            "forwardAgent: yes",
+            "nestedVirtualization: yes",
+            "rootDisk: nope",
+            "env: {KEY: value}",
+            "env:\n  KEY: [one, two]",
+            "env:\n  KEY: first\n  KEY: second",
+            "env:\n  KEY: |\n    multiline",
+            "env:\n  KEY:\n    NESTED: value",
+            r#"env:
+  KEY: "line\nfeed""#,
+            "kubernetes:\n  k3sArgs: [--disable=traefik]",
+            "kubernetes:\n  k3sArgs:\n    - \"unterminated",
+        ] {
+            assert!(StartOptions::parse_config(config).is_err(), "{config}");
+        }
+    }
+
+    #[test]
     fn defaults_for_each_host() {
         for (os, arch, vm_type, mount_type) in [
             ("linux", "x86_64", "qemu", "sshfs"),
@@ -558,6 +834,20 @@ mod tests {
         if cfg!(target_os = "macos") {
             expected.extend(["--network-mode", "shared", "--network-interface", "en0"]);
         }
+        expected.extend([
+            "--mount-inotify=false",
+            "--ssh-agent=false",
+            "--hostname",
+            "",
+            "--root-disk",
+            "20",
+            "--port-forwarder",
+            "ssh",
+            "--cpu-type",
+            "",
+            "--k3s-arg",
+            "--disable=traefik",
+        ]);
         assert_eq!(options.to_args(), expected);
         assert!(
             StartOptions::default()
