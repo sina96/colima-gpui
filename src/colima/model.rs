@@ -95,6 +95,9 @@ pub struct StartOptions {
     pub vm_type: String,
     pub arch: String,
     pub kubernetes: bool,
+    /// Empty uses Colima's default k3s version.
+    pub kubernetes_version: String,
+    pub rosetta: bool,
     pub mount_type: String,
     pub network_address: bool,
     /// Switch the Docker/Kubernetes context to this profile on start. Not stored in
@@ -124,6 +127,8 @@ pub fn host_defaults(os: &str, arch: &str) -> StartOptions {
         }
         .into(),
         kubernetes: false,
+        kubernetes_version: String::new(),
+        rosetta: false,
         mount_type: if linux { "sshfs" } else { "virtiofs" }.into(),
         network_address: false,
         activate: true,
@@ -132,7 +137,7 @@ pub fn host_defaults(os: &str, arch: &str) -> StartOptions {
 
 impl StartOptions {
     pub fn to_args(&self) -> Vec<String> {
-        [
+        let mut args: Vec<String> = [
             ("--cpus", self.cpus.to_string()),
             ("--memory", self.memory_gib.to_string()),
             ("--disk", self.disk_gib.to_string()),
@@ -148,7 +153,21 @@ impl StartOptions {
             format!("--network-address={}", self.network_address),
             format!("--activate={}", self.activate),
         ])
-        .collect()
+        .collect();
+        // Colima only registers this flag on Apple silicon Macs.
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            args.push(format!(
+                "--vz-rosetta={}",
+                self.rosetta && self.vm_type == "vz"
+            ));
+        }
+        // An explicit empty value resets a saved version to Colima's default.
+        // Omitting the flag would keep the old version from colima.yaml.
+        args.extend([
+            "--kubernetes-version".into(),
+            self.kubernetes_version.clone(),
+        ]);
+        args
     }
 
     pub fn read_config(profile: &str) -> Result<Self, super::CliError> {
@@ -222,7 +241,18 @@ impl StartOptions {
                 (false, _, "vmType") => options.vm_type = string()?,
                 (false, _, "arch") => options.arch = string()?,
                 (false, _, "mountType") => options.mount_type = string()?,
+                (false, _, "rosetta") => options.rosetta = boolean()?,
                 (true, "kubernetes", "enabled") => options.kubernetes = boolean()?,
+                (true, "kubernetes", "version") => {
+                    // k3s versions include a build suffix, e.g. v1.35.0+k3s1.
+                    if !value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"-_.+".contains(&b))
+                    {
+                        return Err(error());
+                    }
+                    options.kubernetes_version = value.to_owned();
+                }
                 (true, "network", "address") => options.network_address = boolean()?,
                 _ => {}
             }
@@ -293,28 +323,30 @@ mod tests {
         let options =
             StartOptions::parse_config(include_str!("../../tests/fixtures/colima_config.yaml"))
                 .unwrap();
-        assert_eq!(
-            options.to_args(),
-            [
-                "--cpus",
-                "4",
-                "--memory",
-                "8",
-                "--disk",
-                "120",
-                "--runtime",
-                "containerd",
-                "--vm-type",
-                "qemu",
-                "--arch",
-                "x86_64",
-                "--mount-type",
-                "9p",
-                "--kubernetes=true",
-                "--network-address=true",
-                "--activate=true"
-            ]
-        );
+        let mut expected = vec![
+            "--cpus",
+            "4",
+            "--memory",
+            "8",
+            "--disk",
+            "120",
+            "--runtime",
+            "containerd",
+            "--vm-type",
+            "qemu",
+            "--arch",
+            "x86_64",
+            "--mount-type",
+            "9p",
+            "--kubernetes=true",
+            "--network-address=true",
+            "--activate=true",
+        ];
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            expected.push("--vz-rosetta=false");
+        }
+        expected.extend(["--kubernetes-version", ""]);
+        assert_eq!(options.to_args(), expected);
         assert!(
             StartOptions::default()
                 .to_args()
@@ -327,6 +359,57 @@ mod tests {
         );
         assert!(StartOptions::parse_config("cpu: nope").is_err());
         assert!(StartOptions::read_config_at(std::path::Path::new("/tmp"), "../default").is_err());
+    }
+
+    #[test]
+    fn rosetta_and_nested_kubernetes_version() {
+        let config = include_str!("../../tests/fixtures/colima_config.yaml")
+            .replace("vmType: qemu", "vmType: vz\nrosetta: true")
+            .replace(
+                "  enabled: true",
+                "  enabled: true\n  version: 'v1.35.0+k3s1'",
+            );
+        let mut options = StartOptions::parse_config(&config).unwrap();
+        assert!(options.rosetta);
+        assert_eq!(options.kubernetes_version, "v1.35.0+k3s1");
+        let supports_rosetta = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+        assert_eq!(
+            options.to_args().contains(&"--vz-rosetta=true".into()),
+            supports_rosetta
+        );
+        assert!(
+            options
+                .to_args()
+                .windows(2)
+                .any(|pair| { pair == ["--kubernetes-version", "v1.35.0+k3s1"] })
+        );
+        // Preserve the version even when Kubernetes is disabled for this start.
+        options.kubernetes = false;
+        assert!(options.to_args().contains(&"v1.35.0+k3s1".into()));
+        options.vm_type = "qemu".into();
+        assert_eq!(
+            options.to_args().contains(&"--vz-rosetta=false".into()),
+            supports_rosetta
+        );
+        for value in ["", "\"\"", "''"] {
+            let options = StartOptions::parse_config(&format!(
+                "rosetta: false\nkubernetes:\n  version: {value}\n"
+            ))
+            .unwrap();
+            assert!(!options.rosetta);
+            assert!(options.kubernetes_version.is_empty());
+            assert!(
+                options
+                    .to_args()
+                    .windows(2)
+                    .any(|pair| pair == ["--kubernetes-version", ""])
+            );
+        }
+        assert!(StartOptions::parse_config("rosetta: yes").is_err());
+        assert!(StartOptions::parse_config("kubernetes:\n  version: [v1.35.0+k3s1]").is_err());
+        let options =
+            StartOptions::parse_config("version: ignored\nnetwork:\n  version: ignored").unwrap();
+        assert!(options.kubernetes_version.is_empty());
     }
     #[test]
     fn existing_fixtures() {

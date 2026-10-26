@@ -16,7 +16,7 @@ use crate::ui::button::ButtonSize;
 use crate::ui::select::{Select, SelectChanged};
 use crate::ui::stepper::{Stepper, StepperChanged};
 use crate::ui::text_input::{TextInput, TextInputEvent};
-use crate::ui::{Button, ButtonStyle, InfoTip, Switch};
+use crate::ui::{Button, ButtonStyle, IconName, InfoTip, Switch};
 
 const RUNTIMES: &[&str] = &["docker", "containerd", "incus"];
 #[cfg(not(target_os = "linux"))]
@@ -67,6 +67,9 @@ pub struct ProfileForm {
     arch: Entity<Select<&'static str>>,
     mount_type: Entity<Select<&'static str>>,
     kubernetes: bool,
+    kubernetes_version: Entity<TextInput>,
+    rosetta: bool,
+    advanced_open: bool,
     network_address: bool,
     activate: bool,
     load_warning: Option<SharedString>,
@@ -162,6 +165,11 @@ impl ProfileForm {
         let vm_type = select(VM_TYPES, &initial.vm_type, cx);
         let arch = select(ARCHES, &initial.arch, cx);
         let mount_type = select(MOUNT_TYPES, &initial.mount_type, cx);
+        let kubernetes_version = cx.new(|cx| {
+            let mut input = TextInput::new(cx).placeholder("Colima default");
+            input.set_text(initial.kubernetes_version.clone(), cx);
+            input
+        });
 
         let subscriptions = vec![
             cx.subscribe(&name, |this, _, event: &TextInputEvent, cx| match event {
@@ -186,11 +194,21 @@ impl ProfileForm {
             cx.subscribe(&mount_type, |_, _, _: &SelectChanged<&'static str>, cx| {
                 cx.notify()
             }),
+            cx.subscribe(
+                &kubernetes_version,
+                |this, _, event: &TextInputEvent, cx| match event {
+                    TextInputEvent::Changed => cx.notify(),
+                    TextInputEvent::Submitted => this.submit(cx),
+                },
+            ),
         ];
 
         Self {
             mode,
             kubernetes: initial.kubernetes,
+            kubernetes_version,
+            rosetta: initial.rosetta,
+            advanced_open: false,
             network_address: initial.network_address,
             activate: initial.activate,
             initial,
@@ -223,6 +241,8 @@ impl ProfileForm {
             vm_type: value(&self.vm_type),
             arch: value(&self.arch),
             kubernetes: self.kubernetes,
+            kubernetes_version: self.kubernetes_version.read(cx).text().trim().to_owned(),
+            rosetta: self.rosetta && value(&self.vm_type) == "vz",
             mount_type: value(&self.mount_type),
             network_address: self.network_address,
             activate: self.activate,
@@ -349,6 +369,17 @@ impl Render for ProfileForm {
                 cx,
             ),
         ));
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) && options.vm_type == "vz" {
+            rows.push((
+                "Rosetta",
+                self.render_toggle(
+                    "rosetta",
+                    self.rosetta,
+                    |this| this.rosetta = !this.rosetta,
+                    cx,
+                ),
+            ));
+        }
         rows.push((
             "Network address",
             self.render_toggle(
@@ -430,6 +461,34 @@ impl Render for ProfileForm {
                             )
                             .child(div().flex_1().max_w(px(320.)).child(control))
                     })))
+                    .child(
+                        div().flex().child(
+                            Button::new("advanced-options", "Advanced")
+                                .icon(if self.advanced_open { IconName::ChevronDown } else { IconName::ChevronRight })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.advanced_open = !this.advanced_open;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .when(self.advanced_open, |el| {
+                        // Keep the group order stable as more Colima options are added.
+                        el.child(
+                            div().flex().flex_col().gap_3()
+                                .child(advanced_heading("Mounts", cx))
+                                .child(advanced_heading("Network", cx))
+                                .child(advanced_heading("Kubernetes", cx))
+                                .when(self.kubernetes, |el| {
+                                    el.child(
+                                        div().flex().items_center().min_h(px(40.))
+                                            .child(div().w(px(200.)).flex_none().text_sm()
+                                                .text_color(theme.text_muted).child("Version"))
+                                            .child(div().flex_1().max_w(px(320.)).child(self.kubernetes_version.clone())),
+                                    )
+                                })
+                                .child(advanced_heading("VM", cx)),
+                        )
+                    })
                     .when_some(problem.filter(|_| !hide_problem), |el, problem| {
                         el.child(div().text_sm().text_color(theme.error).child(problem))
                     })
@@ -450,6 +509,16 @@ impl Render for ProfileForm {
                     }),
             )
     }
+}
+
+fn advanced_heading(label: &'static str, cx: &App) -> impl IntoElement {
+    div()
+        .text_sm()
+        .text_color(cx.theme().text_muted)
+        .border_b_1()
+        .border_color(cx.theme().border_variant)
+        .pb_1()
+        .child(label)
 }
 
 fn select(
