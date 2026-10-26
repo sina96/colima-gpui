@@ -313,7 +313,12 @@ impl ProfileForm {
                     .collect()
             }),
             network_address: self.network_address,
-            dns: dns_servers(self.dns.read(cx).text()),
+            // Colima 0.10.3 writes the VM's dnsmasq servers only when it creates the VM.
+            dns: if matches!(self.mode, FormMode::Create { .. }) {
+                dns_servers(self.dns.read(cx).text())
+            } else {
+                self.initial.dns.clone()
+            },
             network_mode: if matches!(self.mode, FormMode::Create { .. }) {
                 value(&self.network_mode)
             } else {
@@ -656,14 +661,14 @@ impl Render for ProfileForm {
                             div().flex().flex_col().gap_3()
                                 .child(advanced_heading("Mounts", cx))
                                 .child(advanced_heading("Network", cx))
-                                .child(advanced_row("DNS servers", self.dns.clone().into_any_element(), cx))
+                                .child(advanced_row("DNS servers", if creating { self.dns.clone().into_any_element() } else if options.dns.is_empty() { fixed("Colima default") } else { fixed(&options.dns.join(", ")) }, cx))
                                 .when(cfg!(target_os = "macos"), |el| {
                                     el.child(advanced_row("Mode", if creating { self.network_mode.clone().into_any_element() } else { fixed(&options.network_mode) }, cx))
                                         .when(options.network_mode == "bridged", |el| {
                                             el.child(advanced_row("Host interface", self.network_interface.clone().into_any_element(), cx))
                                         })
                                         .child(div().text_sm().text_color(theme.text_muted)
-                                            .child("Shared and bridged modes require Network address to be enabled. Mode is fixed after creation."))
+                                            .child("Shared and bridged modes require Network address to be enabled. DNS servers and mode are fixed after creation."))
                                 })
                                 .child(advanced_heading("Kubernetes", cx))
                                 .when(self.kubernetes, |el| {
